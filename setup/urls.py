@@ -1,0 +1,42 @@
+"""
+URL configuration for setup project.
+
+The `urlpatterns` list routes URLs to views. For more information please see:
+    https://docs.djangoproject.com/en/5.2/topics/http/urls/
+Examples:
+Function views
+    1. Add an import:  from my_app import views
+    2. Add a URL to urlpatterns:  path('', views.home, name='home')
+Class-based views
+    1. Add an import:  from other_app.views import Home
+    2. Add a URL to urlpatterns:  path('', Home.as_view(), name='home')
+Including another URLconf
+    1. Import the include() function: from django.urls import include, path
+    2. Add a URL to urlpatterns:  path('blog/', include('blog.urls'))
+"""
+from django.contrib import admin
+from django.urls import path,include
+from django.conf.urls.static import static
+from django.conf import settings
+from rest_framework.routers import DefaultRouter
+from bonding.views import (
+    ProfileViewSet,PhotoViewSet,ConnectionViewSet,ConversationViewSet,MessageViewSet,InterestViewSet,PreferenceViewSet,LocationCreateOrRetrieveView,RegisterUserView,CustomTokenObtainPairView,VerifyEmailView
+)
+
+router = DefaultRouter()
+router.register(r'profiles',ProfileViewSet,basename='profile')
+router.register(r'photos', PhotoViewSet, basename='photo')
+router.register(r'connections', ConnectionViewSet, basename='connection')
+router.register(r'conversations', ConversationViewSet, basename='conversation')
+router.register(r'messages', MessageViewSet, basename='message')
+router.register(r'interests', InterestViewSet, basename='interest')
+router.register(r'preferences', PreferenceViewSet, basename='preference')
+urlpatterns = [
+    path('admin/', admin.site.urls),
+    path('',include(router.urls)),
+    path('locations/', LocationCreateOrRetrieveView.as_view(), name='location-create-retrieve'),
+    path('verify-email/<int:user_id>/<uuid:token>/',VerifyEmailView.as_view(),name='verify-email'),
+    path('register-new-user/',RegisterUserView.as_view(),name='register-new-user'),
+    path('api/token/',CustomTokenObtainPairView.as_view(),name='token_obtain_pair'),
+] + static(settings.MEDIA_URL,
+document_root=settings.MEDIA_ROOT)
