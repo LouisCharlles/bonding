@@ -1,5 +1,8 @@
 boto3==1.40.9
 ﻿asgiref==3.9.1
+channels==4.2.2
+channels_redis==4.2.1
+daphne==4.2.1
 Django==5.2.4
 dj-database-url==2.3.0
 django-rest-framework==0.1.0
@@ -21,3 +24,4 @@ tzdata==2025.2
 uritemplate==4.2.0
 whitenoise==6.9.0
 psycopg[binary]==3.2.9
+redis==6.4.0
