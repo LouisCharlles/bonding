@@ -65,6 +65,7 @@ class SupabaseStorage(Storage):
             raise FileNotFoundError(name) from exc
 
     def _save(self, name, content):
+        name = name.replace('\\', '/')
         if not self.is_configured:
             raise RuntimeError("Supabase Storage não está configurado.")
 
