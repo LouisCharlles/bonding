@@ -1,10 +1,16 @@
 from django.db import models
 from .user import User
+
+
 class Notification(models.Model):
     NOTIFICATION_TYPES = [
         ('NEW_MESSAGE', 'Nova Mensagem'),
-        ('NEW_CONNECTION', 'Nova Conexão'),
-        ('LIKE_RECEIVED','Você recebe um Like'),
+        ('NEW_CONNECTION', 'Nova Conexao'),
+        ('NEW_MATCH', 'Novo Match'),
+        ('LIKE_RECEIVED', 'Voce recebeu um Like'),
+        ('PROFILE_VERIFIED', 'Perfil verificado'),
+        ('VIDEO_CALL_INVITE', 'Convite para videochamada'),
+        ('PREMIUM_UPDATED', 'Plano premium atualizado'),
     ]
 
     notification_type = models.CharField(

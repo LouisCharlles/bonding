@@ -1,10 +1,14 @@
 from django.db import models
 from .profile import Profile
+from ..storage import get_photo_storage
+
+
 class Photo(models.Model):
-    profile = models.ForeignKey(Profile,related_name='photos',on_delete=models.CASCADE)
-    image = models.ImageField(upload_to='profile_gallery/')
+    profile = models.ForeignKey(Profile, related_name='photos', on_delete=models.CASCADE)
+    image = models.ImageField(upload_to='profile_gallery/', storage=get_photo_storage())
     description = models.CharField(max_length=255, blank=True, null=True)
     order = models.PositiveIntegerField(default=0)
+    is_primary = models.BooleanField(default=False)
     updated_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:

@@ -1,4 +1,68 @@
 from django.contrib import admin
-from .models import User
-# Register your models here.
+from .models import (
+    Connection,
+    Conversation,
+    Interest,
+    Location,
+    Match,
+    Message,
+    MessageReaction,
+    Notification,
+    Photo,
+    Preference,
+    PremiumPlan,
+    Profile,
+    ProfileVerificationAttempt,
+    PasswordResetToken,
+    PushDevice,
+    Report,
+    Story,
+    StoryReaction,
+    StoryView,
+    Subscription,
+    Block,
+    User,
+    VerificationSelfie,
+    VerificationToken,
+    VideoCallSession,
+    Wallet,
+    WalletLedger,
+    RewardEvent,
+    UnlockSession,
+    Institution,
+    InstitutionDomain,
+    UserLocationPing,
+)
+
 admin.site.register(User)
+admin.site.register(Profile)
+admin.site.register(Photo)
+admin.site.register(Interest)
+admin.site.register(Preference)
+admin.site.register(Location)
+admin.site.register(Connection)
+admin.site.register(Match)
+admin.site.register(Conversation)
+admin.site.register(Message)
+admin.site.register(MessageReaction)
+admin.site.register(Notification)
+admin.site.register(Report)
+admin.site.register(PremiumPlan)
+admin.site.register(Subscription)
+admin.site.register(Block)
+admin.site.register(Story)
+admin.site.register(StoryReaction)
+admin.site.register(StoryView)
+admin.site.register(Wallet)
+admin.site.register(WalletLedger)
+admin.site.register(RewardEvent)
+admin.site.register(UnlockSession)
+admin.site.register(ProfileVerificationAttempt)
+admin.site.register(VerificationSelfie)
+admin.site.register(Institution)
+admin.site.register(InstitutionDomain)
+admin.site.register(UserLocationPing)
+admin.site.register(PushDevice)
+admin.site.register(VideoCallSession)
+admin.site.register(VerificationToken)
+admin.site.register(PasswordResetToken)

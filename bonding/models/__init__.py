@@ -7,8 +7,22 @@ from .location import Location
 from .connection import Connection
 from .conversation import Conversation
 from .message import Message
+from .match import Match
 from .notification import Notification
+from .report import Report
+from .premium_plan import PremiumPlan
+from .subscription import Subscription
+from .push_device import PushDevice
+from .video_call_session import VideoCallSession
 from .verification_token import VerificationToken
+from .password_reset_token import PasswordResetToken
+from .block import Block
+from .story import Story, StoryReaction, StoryView
+from .wallet import RewardEvent, UnlockSession, Wallet, WalletLedger
+from .verification import ProfileVerificationAttempt, VerificationSelfie
+from .institution import Institution, InstitutionDomain
+from .location_ping import UserLocationPing
+from .message import MessageReaction
 __all__ = [
     'Profile',
     'User',
@@ -19,6 +33,27 @@ __all__ = [
     'Connection',
     'Conversation',
     'Message',
+    'Match',
     'Notification',
+    'Report',
+    'PremiumPlan',
+    'Subscription',
+    'PushDevice',
+    'VideoCallSession',
     'VerificationToken',
+    'PasswordResetToken',
+    'Block',
+    'Story',
+    'StoryReaction',
+    'StoryView',
+    'Wallet',
+    'WalletLedger',
+    'RewardEvent',
+    'UnlockSession',
+    'ProfileVerificationAttempt',
+    'VerificationSelfie',
+    'Institution',
+    'InstitutionDomain',
+    'UserLocationPing',
+    'MessageReaction',
 ]

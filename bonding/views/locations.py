@@ -1,57 +1,76 @@
-from rest_framework import generics, status, permissions
+from rest_framework import generics, permissions, status
 from rest_framework.response import Response
-from geopy.geocoders import Nominatim
-from ..models import Location
-from ..serial import LocationSerializer
+from rest_framework.views import APIView
 
-geolocator = Nominatim(user_agent='bonding')
+from ..models import Location, UserLocationPing
+from ..serializers import LocationSerializer
+
 
 class LocationCreateOrRetrieveView(generics.GenericAPIView):
-    """
-    View para buscar uma localização existente ou criar uma nova
-    com base nas coordenadas de latitude e longitude.
-    """
     queryset = Location.objects.all()
     serializer_class = LocationSerializer
     permission_classes = [permissions.IsAuthenticated]
 
-    def post(self,request,*args,**kwargs):
-        latitude = request.data.get('latitude')
-        longitude = request.data.get('longitude')
+    def post(self, request, *args, **kwargs):
+        latitude = request.data.get("latitude")
+        longitude = request.data.get("longitude")
+        city = request.data.get("city")
+        state = request.data.get("state")
+        country = request.data.get("country")
+        neighborhood = request.data.get("neighborhood")
 
-        if not latitude or not longitude:
-            return Response({'error':'Latitude e Longitude são obrigatórios'},status=status.HTTP_400_BAD_REQUEST)
-        try:
-            #Conversão das coordenadas em endereço(geocoding reverso)
-            location_data = geolocator.reverse(f"{latitude}, {longitude}",language='pt-BR')
-
-            if not location_data:
-                return Response({'error':"Não foi possivel encontrar um endereço para estas coordenadas."},status=status.HTTP_400_BAD_REQUEST)
-            
-            address = location_data.raw['address']
-
-            city = address.get('city') or address.get('town') or address.get('village')
-
-            state = address.get("state")
-
-            country = address.get('country')
-
-            if not city or not state or not country:
-                return Response({'error': 'Endereço incompleto. Cidade, estado ou país não encontrados.'}, status=status.HTTP_400_BAD_REQUEST)
-            
-            location, created = Location.objects.get_or_create(
-                city=city,
-                state=state,
-                country=country,
-                defaults={'latitude':latitude, 'longitude':longitude}
+        if not any([latitude, longitude, city, state, country]):
+            return Response(
+                {"error": "Informe coordenadas ou pelo menos cidade/estado/pais."},
+                status=status.HTTP_400_BAD_REQUEST,
             )
 
-            if not created and (location.latitude != latitude or location.longitude != longitude):
-                location.latitude = latitude
-                location.longitude = longitude
-                location.save()
+        location, _ = Location.objects.get_or_create(
+            city=city,
+            state=state,
+            country=country,
+            defaults={
+                "latitude": latitude,
+                "longitude": longitude,
+                "neighborhood": neighborhood,
+            },
+        )
 
-            serializer = self.get_serializer(location)
-            return Response(serializer.data, status=status.HTTP_201_CREATED)
-        except Exception as e:
-            return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+        changed = False
+        for field, value in {
+            "latitude": latitude,
+            "longitude": longitude,
+            "neighborhood": neighborhood,
+        }.items():
+            if value not in [None, ""] and getattr(location, field) != value:
+                setattr(location, field, value)
+                changed = True
+        if changed:
+            location.save()
+
+        serializer = self.get_serializer(location)
+        return Response(serializer.data, status=status.HTTP_201_CREATED)
+
+
+class UserLocationPingView(APIView):
+    permission_classes = [permissions.IsAuthenticated]
+
+    def post(self, request):
+        latitude = request.data.get("latitude")
+        longitude = request.data.get("longitude")
+        if latitude in [None, ""] or longitude in [None, ""]:
+            return Response({"detail": "latitude e longitude sao obrigatorios."}, status=400)
+
+        ping = UserLocationPing.objects.create(
+            user=request.user,
+            latitude=latitude,
+            longitude=longitude,
+            accuracy_meters=request.data.get("accuracy_meters"),
+        )
+        return Response({
+            "id": ping.id,
+            "latitude": ping.latitude,
+            "longitude": ping.longitude,
+            "accuracy_meters": ping.accuracy_meters,
+            "created_at": ping.created_at,
+        }, status=201)
