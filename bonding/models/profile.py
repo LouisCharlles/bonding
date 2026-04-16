@@ -80,6 +80,7 @@ class Profile(models.Model):
     sexual_orientation = models.CharField(max_length=20, choices=choices_orientation)
     course = models.CharField(max_length=100)
     is_online = models.BooleanField(default=False)
+    last_seen = models.DateTimeField(blank=True, null=True)
     show_age = models.BooleanField(default=True)
     is_verified = models.BooleanField(default=False)
     verification_status = models.CharField(

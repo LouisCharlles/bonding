@@ -16,7 +16,7 @@ from .push_devices import PushDeviceViewSet
 from .reports import ReportViewSet
 from .stories import StoryViewSet
 from .token import CustomTokenObtainPairView, CustomTokenRefreshView
-from .users import MeView, RegisterUserView
+from .users import MeView, PresenceHeartbeatView, RegisterUserView
 from .verification import ProfileVerificationAttemptView
 from .video_calls import VideoCallSessionViewSet
 from .wallet import WalletViewSet
@@ -47,6 +47,7 @@ __all__ = [
     'CustomTokenObtainPairView',
     'CustomTokenRefreshView',
     'MeView',
+    'PresenceHeartbeatView',
     'RegisterUserView',
     'ProfileVerificationAttemptView',
     'VideoCallSessionViewSet',

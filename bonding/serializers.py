@@ -34,6 +34,7 @@ from .models import (
     Wallet,
     WalletLedger,
 )
+from .services.presence import is_profile_online, touch_user_presence
 
 User = get_user_model()
 
@@ -50,6 +51,7 @@ class CustomTokenObtainPairSerializer(TokenObtainPairSerializer):
     def validate(self, attrs):
         attrs["email"] = attrs.get("email", "").lower().strip()
         data = super().validate(attrs)
+        touch_user_presence(self.user, active=True)
         data["user"] = UserSummarySerializer(self.user).data
         return data
 
@@ -199,6 +201,7 @@ class ProfileSerializer(serializers.ModelSerializer):
         required=False,
     )
     stats = serializers.SerializerMethodField()
+    is_online = serializers.SerializerMethodField()
 
     class Meta:
         model = Profile
@@ -215,6 +218,7 @@ class ProfileSerializer(serializers.ModelSerializer):
             "course",
             "sexual_orientation",
             "is_online",
+            "last_seen",
             "show_age",
             "is_verified",
             "verification_status",
@@ -251,6 +255,8 @@ class ProfileSerializer(serializers.ModelSerializer):
             "verification_status",
             "premium_tier",
             "spotify_track",
+            "is_online",
+            "last_seen",
             "created_at",
             "updated_at",
             "stats",
@@ -283,6 +289,9 @@ class ProfileSerializer(serializers.ModelSerializer):
             "image_url": obj.spotify_album_image_url,
             "preview_url": obj.spotify_preview_url,
         }
+
+    def get_is_online(self, obj):
+        return is_profile_online(obj)
 
     def create(self, validated_data):
         interests = validated_data.pop("interests", [])
