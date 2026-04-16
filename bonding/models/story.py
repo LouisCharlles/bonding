@@ -2,6 +2,7 @@ from datetime import timedelta
 
 from django.conf import settings
 from django.db import models
+from django.db.models import Q
 from django.utils import timezone
 
 from ..storage import get_photo_storage
@@ -34,6 +35,7 @@ class Story(models.Model):
         choices=[(VISIBILITY_MATCHES, "Matches"), (VISIBILITY_ALL, "Todos")],
         default=VISIBILITY_MATCHES,
     )
+    client_request_id = models.CharField(max_length=64, blank=True, null=True)
     is_active = models.BooleanField(default=True)
     expires_at = models.DateTimeField(default=default_story_expiration)
     created_at = models.DateTimeField(auto_now_add=True)
@@ -41,6 +43,13 @@ class Story(models.Model):
 
     class Meta:
         ordering = ["-created_at"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["author", "client_request_id"],
+                condition=Q(client_request_id__isnull=False),
+                name="bonding_story_author_client_request_id_uniq",
+            ),
+        ]
 
     @property
     def is_expired(self):

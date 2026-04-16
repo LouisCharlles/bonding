@@ -96,6 +96,7 @@ class PhotoSerializer(serializers.ModelSerializer):
             "description",
             "order",
             "is_primary",
+            "client_request_id",
             "updated_at",
         ]
         read_only_fields = ["id", "updated_at"]
@@ -147,6 +148,7 @@ class StorySerializer(serializers.ModelSerializer):
             "media_url",
             "caption",
             "visibility",
+            "client_request_id",
             "is_active",
             "expires_at",
             "created_at",
@@ -491,6 +493,7 @@ class MessageSerializer(serializers.ModelSerializer):
             "story",
             "reply_to_message",
             "is_view_once",
+            "client_request_id",
             "consumed_at",
             "is_system",
             "created_at",

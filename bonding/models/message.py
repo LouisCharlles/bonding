@@ -1,4 +1,5 @@
 from django.db import models
+from django.db.models import Q
 from .conversation import Conversation
 from .user import User
 from ..storage import get_photo_storage
@@ -44,6 +45,7 @@ class Message(models.Model):
         null=True,
     )
     is_view_once = models.BooleanField(default=False)
+    client_request_id = models.CharField(max_length=64, blank=True, null=True)
     consumed_at = models.DateTimeField(blank=True, null=True)
     is_system = models.BooleanField(default=False)
     created_at = models.DateTimeField(auto_now_add=True)
@@ -51,6 +53,13 @@ class Message(models.Model):
 
     class Meta:
         ordering = ['created_at']
+        constraints = [
+            models.UniqueConstraint(
+                fields=["sender", "client_request_id"],
+                condition=Q(client_request_id__isnull=False),
+                name="bonding_message_sender_client_request_id_uniq",
+            ),
+        ]
 
     def __str__(self):
         return f"Message {self.id} in conversation {self.conversation_id}"

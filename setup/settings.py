@@ -91,6 +91,7 @@ CSRF_TRUSTED_ORIGINS = config('CSRF_TRUSTED_ORIGINS', cast=Csv(), default='')
 # Application definition
 
 INSTALLED_APPS = [
+    'daphne',
     'django.contrib.admin',
     'django.contrib.auth',
     'django.contrib.contenttypes',
@@ -102,6 +103,7 @@ INSTALLED_APPS = [
     'rest_framework',
     'rest_framework.authtoken',
     'drf_yasg',
+    'channels',
 ]
 
 REST_FRAMEWORK = {
@@ -152,6 +154,7 @@ TEMPLATES = [
 ]
 
 WSGI_APPLICATION = 'setup.wsgi.application'
+ASGI_APPLICATION = 'setup.asgi.application'
 AUTH_USER_MODEL = 'bonding.User'
 
 
@@ -161,7 +164,7 @@ AUTH_USER_MODEL = 'bonding.User'
 DATABASES = {
     'default': dj_database_url.config(
         default=f"{config('DATABASE_URL')}",
-        conn_max_age=600,
+        conn_max_age=0,
         conn_health_checks=True,
     )
 }
@@ -231,6 +234,16 @@ AWS_REKOGNITION_ENABLED = env_bool('AWS_REKOGNITION_ENABLED', default=False)
 VERIFICATION_PROVIDER = config('VERIFICATION_PROVIDER', default='aws_rekognition')
 SPOTIFY_CLIENT_ID = config('SPOTIFY_CLIENT_ID', default='')
 SPOTIFY_CLIENT_SECRET = config('SPOTIFY_CLIENT_SECRET', default='')
+REDIS_URL = config('REDIS_URL', default='redis://127.0.0.1:6379/1')
+
+CHANNEL_LAYERS = {
+    "default": {
+        "BACKEND": "channels_redis.core.RedisChannelLayer",
+        "CONFIG": {
+            "hosts": [REDIS_URL],
+        },
+    },
+}
 
 # Default primary key field type
 # https://docs.djangoproject.com/en/5.2/ref/settings/#default-auto-field
