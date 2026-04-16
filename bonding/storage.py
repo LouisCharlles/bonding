@@ -2,6 +2,7 @@ import mimetypes
 import posixpath
 import uuid
 import json
+from pathlib import Path
 from urllib.error import HTTPError, URLError
 from urllib.parse import quote
 from urllib.request import Request, urlopen
@@ -69,10 +70,13 @@ class SupabaseStorage(Storage):
             raise RuntimeError("Supabase Storage não está configurado.")
 
         directory, filename = posixpath.split(name)
-        unique_name = f"{uuid.uuid4().hex}-{filename}"
+        original_extension = Path(filename).suffix.lower()
+        content_type = getattr(content, "content_type", None) or mimetypes.guess_type(filename)[0] or "application/octet-stream"
+        guessed_extension = mimetypes.guess_extension(content_type.split(";")[0]) or ""
+        extension = original_extension or guessed_extension
+        unique_name = f"{uuid.uuid4().hex}{extension}"
         final_name = posixpath.join(directory, unique_name) if directory else unique_name
         file_bytes = content.read()
-        content_type = getattr(content, "content_type", None) or mimetypes.guess_type(filename)[0] or "application/octet-stream"
 
         self._request(
             "PUT",
