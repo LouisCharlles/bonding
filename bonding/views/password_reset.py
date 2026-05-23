@@ -1,4 +1,5 @@
 from datetime import timedelta
+import logging
 import uuid
 
 from django.conf import settings
@@ -9,6 +10,8 @@ from django.utils import timezone
 from rest_framework import permissions, serializers, status
 from rest_framework.response import Response
 from rest_framework.views import APIView
+
+logger = logging.getLogger(__name__)
 
 from ..models import PasswordResetToken
 
@@ -54,17 +57,25 @@ class ForgotPasswordView(APIView):
                 f"{user.id}/{reset_token.token}"
             )
 
-            send_mail(
-                "Redefinição de senha - Bonding",
-                (
-                    "Recebemos um pedido para redefinir sua senha.\n\n"
-                    f"Acesse o link para continuar: {reset_url}\n\n"
-                    "Se você não pediu essa alteração, ignore este e-mail."
-                ),
-                settings.DEFAULT_FROM_EMAIL,
-                [user.email],
-                fail_silently=False,
-            )
+            try:
+                send_mail(
+                    "Redefinição de senha - Bonding",
+                    (
+                        "Recebemos um pedido para redefinir sua senha.\n\n"
+                        f"Acesse o link para continuar: {reset_url}\n\n"
+                        "Se você não pediu essa alteração, ignore este e-mail."
+                    ),
+                    settings.DEFAULT_FROM_EMAIL,
+                    [user.email],
+                    fail_silently=False,
+                )
+            except Exception as exc:
+                logger.error(
+                    "Password reset email failed for user %s: %s",
+                    user.id,
+                    exc,
+                    exc_info=True,
+                )
 
         return Response(
             {

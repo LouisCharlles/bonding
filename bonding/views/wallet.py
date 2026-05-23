@@ -24,7 +24,8 @@ class WalletViewSet(viewsets.ViewSet):
         unlocks = UnlockSession.objects.filter(user=request.user)
         return Response(UnlockSessionSerializer(unlocks, many=True).data)
 
-    @action(detail=False, methods=["post"], url_path="reward-video")
+    @action(detail=False, methods=["post"], url_path="reward-video",
+            permission_classes=[permissions.IsAdminUser])
     def reward_video(self, request):
         success, message = award_video_ribbons(request.user)
         return Response({"success": success, "detail": message}, status=200 if success else 400)

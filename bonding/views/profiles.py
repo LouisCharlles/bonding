@@ -1,3 +1,4 @@
+from django.core.cache import cache
 from django.db.models import Q
 from rest_framework import decorators, permissions, response, status, viewsets
 from rest_framework.exceptions import PermissionDenied
@@ -52,6 +53,10 @@ class ProfileViewSet(viewsets.ModelViewSet):
 
     @decorators.action(detail=False, methods=["get"], url_path="me")
     def me(self, request):
+        cache_key = f"profile_me:{request.user.id}"
+        cached = cache.get(cache_key)
+        if cached is not None:
+            return response.Response(cached)
         profile = getattr(request.user, "profile", None)
         if not profile:
             return response.Response(
@@ -59,15 +64,21 @@ class ProfileViewSet(viewsets.ModelViewSet):
                 status=status.HTTP_404_NOT_FOUND,
             )
         serializer = self.get_serializer(profile)
+        cache.set(cache_key, serializer.data, timeout=300)
         return response.Response(serializer.data)
 
     @decorators.action(detail=False, methods=["get"], url_path="discover")
     def discover(self, request):
+        cache_key = f"discover:{request.user.id}"
+        cached = cache.get(cache_key)
+        if cached is not None:
+            return response.Response(cached)
         serializer = DiscoverProfileSerializer(
             self.get_queryset()[:20],
             many=True,
             context={"request": request},
         )
+        cache.set(cache_key, serializer.data, timeout=45)
         return response.Response(serializer.data)
 
     def perform_create(self, serializer):
@@ -80,6 +91,7 @@ class ProfileViewSet(viewsets.ModelViewSet):
         if profile.user != self.request.user:
             raise PermissionDenied("Voce nao tem permissao para editar este perfil.")
         serializer.save()
+        cache.delete(f"profile_me:{self.request.user.id}")
 
     def perform_destroy(self, instance):
         if instance.user != self.request.user:

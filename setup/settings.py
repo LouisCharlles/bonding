@@ -11,7 +11,6 @@ https://docs.djangoproject.com/en/5.2/ref/settings/
 """
 
 from pathlib import Path
-from urllib.parse import urlparse
 from decouple import config, Csv
 from datetime import timedelta
 from corsheaders.defaults import default_headers
@@ -47,6 +46,7 @@ SECRET_KEY = config('SECRET_KEY')
 
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = env_bool('DEBUG', default=False)
+SECURITY_HARDENING = env_bool("SECURITY_HARDENING", default=not DEBUG)
 
 ALLOWED_HOSTS = config('ALLOWED_HOSTS', cast=Csv())
 
@@ -82,6 +82,9 @@ CORS_ALLOWED_ORIGIN_REGEXES = [
 ]
 CORS_ALLOW_CREDENTIALS = env_bool("CORS_ALLOW_CREDENTIALS", default=True)
 CORS_ALLOW_HEADERS = (*default_headers, "ngrok-skip-browser-warning")
+DEFAULT_CORS_ALLOW_ALL = DEBUG and not SECURITY_HARDENING
+# DEFAULT_CORS_ALLOW_ALL = False #Para testes com burpsuite. Nunca deixe isso como True em produção, mesmo que DEBUG seja True, por questões de segurança.
+CORS_ALLOW_ALL_ORIGINS = env_bool("CORS_ALLOW_ALL_ORIGINS", default=DEFAULT_CORS_ALLOW_ALL)
 CSRF_TRUSTED_ORIGINS = config('CSRF_TRUSTED_ORIGINS', cast=Csv(), default='')
 
 # for origin in CORS_ALLOWED_ORIGINS:
@@ -109,7 +112,6 @@ INSTALLED_APPS = [
 REST_FRAMEWORK = {
     'DEFAULT_AUTHENTICATION_CLASSES': [
         'rest_framework_simplejwt.authentication.JWTAuthentication',
-        'rest_framework.authentication.SessionAuthentication',
     ],
     'DEFAULT_PERMISSION_CLASSES': [
         'rest_framework.permissions.IsAuthenticated',
@@ -117,11 +119,12 @@ REST_FRAMEWORK = {
 }
 
 SIMPLE_JWT = {
-    "ACCESS_TOKEN_LIFETIME": timedelta(hours=2),
-    "REFRESH_TOKEN_LIFETIME": timedelta(days=1),  
+    "ACCESS_TOKEN_LIFETIME": timedelta(minutes=15),
+    "REFRESH_TOKEN_LIFETIME": timedelta(days=7),
     "AUTH_HEADER_TYPES": ("Bearer",),
     "USER_ID_FIELD": "id",
     "USER_ID_CLAIM": "user_id",
+    "UPDATE_LAST_LOGIN": True,
 }
 
 MIDDLEWARE = [
@@ -168,6 +171,21 @@ DATABASES = {
         conn_health_checks=True,
     )
 }
+default_engine = DATABASES["default"].get("ENGINE", "")
+if "postgresql" in default_engine:
+    DATABASES["default"].setdefault("OPTIONS", {})
+    
+    if SECURITY_HARDENING:
+        # Modo de segurança máxima para Produção/Staging
+        DATABASES["default"]["OPTIONS"].update({
+            "sslmode": "verify-full", # Verifica a criptografia E a identidade do servidor
+            "sslrootcert": os.path.join(BASE_DIR, ".certs", "prod-ca-2021.crt"),
+        })
+    else:
+        # Modo relaxado para desenvolvimento local (se você rodar o Postgres num Docker local, por exemplo)
+        DATABASES["default"]["OPTIONS"].setdefault(
+            "sslmode", config("DATABASE_SSL_MODE", default="prefer")
+        )
 
 
 # Password validation
@@ -226,15 +244,58 @@ SUPABASE_URL = config('SUPABASE_URL', default='')
 SUPABASE_ANON_KEY = config('SUPABASE_ANON_KEY', default='')
 SUPABASE_SERVICE_ROLE_KEY = config('SUPABASE_SERVICE_ROLE_KEY', default='')
 SUPABASE_STORAGE_BUCKET = config('SUPABASE_STORAGE_BUCKET', default='profile-gallery')
+SUPABASE_SIGNED_URL_TTL = config("SUPABASE_SIGNED_URL_TTL", cast=int, default=900)
 FRONTEND_URL = config('FRONTEND_URL', default='http://localhost:8080')
-STRIPE_SECRET_KEY = config('STRIPE_SECRET_KEY', default='')
-STRIPE_WEBHOOK_SECRET = config('STRIPE_WEBHOOK_SECRET', default='')
+BACKEND_URL = config('BACKEND_URL', default='http://127.0.0.1:8000')
+ABACATEPAY_API_KEY = config('ABACATEPAY_API_KEY', default='')
+ABACATEPAY_WEBHOOK_TOKEN = config('ABACATEPAY_WEBHOOK_TOKEN', default='')
 GOOGLE_MAPS_API_KEY = config('GOOGLE_MAPS_API_KEY', default='')
 AWS_REKOGNITION_ENABLED = env_bool('AWS_REKOGNITION_ENABLED', default=False)
 VERIFICATION_PROVIDER = config('VERIFICATION_PROVIDER', default='aws_rekognition')
 SPOTIFY_CLIENT_ID = config('SPOTIFY_CLIENT_ID', default='')
 SPOTIFY_CLIENT_SECRET = config('SPOTIFY_CLIENT_SECRET', default='')
 REDIS_URL = config('REDIS_URL', default='redis://127.0.0.1:6379/1')
+REDIS_CELERY_URL = config('REDIS_CELERY_URL', default='redis://127.0.0.1:6379/2')
+GOOGLE_SSV_ENABLED = config('GOOGLE_SSV_ENABLED', default=True, cast=bool)
+GEMINI_API_KEY = config('GEMINI_API_KEY', default='')
+FIELD_ENCRYPTION_KEY = config("FIELD_ENCRYPTION_KEY", default="")
+
+AUTH_ACCESS_COOKIE_NAME = config("AUTH_ACCESS_COOKIE_NAME", default="bonding_access")
+AUTH_REFRESH_COOKIE_NAME = config("AUTH_REFRESH_COOKIE_NAME", default="bonding_refresh")
+AUTH_REFRESH_COOKIE_PATH = config("AUTH_REFRESH_COOKIE_PATH", default="/api/token/refresh/")
+AUTH_COOKIE_SECURE = env_bool("AUTH_COOKIE_SECURE", default=SECURITY_HARDENING)
+AUTH_COOKIE_SAMESITE = config("AUTH_COOKIE_SAMESITE", default="Lax")
+AUTH_COOKIE_DOMAIN = config("AUTH_COOKIE_DOMAIN", default="")
+AUTH_ACCESS_COOKIE_MAX_AGE = int(SIMPLE_JWT["ACCESS_TOKEN_LIFETIME"].total_seconds())
+AUTH_REFRESH_COOKIE_MAX_AGE = int(SIMPLE_JWT["REFRESH_TOKEN_LIFETIME"].total_seconds())
+
+SECURE_SSL_REDIRECT = env_bool("SECURE_SSL_REDIRECT", default=SECURITY_HARDENING)
+SESSION_COOKIE_SECURE = env_bool("SESSION_COOKIE_SECURE", default=SECURITY_HARDENING)
+CSRF_COOKIE_SECURE = env_bool("CSRF_COOKIE_SECURE", default=SECURITY_HARDENING)
+SESSION_COOKIE_HTTPONLY = True
+CSRF_COOKIE_HTTPONLY = env_bool("CSRF_COOKIE_HTTPONLY", default=False)
+SECURE_HSTS_SECONDS = config("SECURE_HSTS_SECONDS", cast=int, default=31536000 if SECURITY_HARDENING else 0)
+SECURE_HSTS_INCLUDE_SUBDOMAINS = env_bool("SECURE_HSTS_INCLUDE_SUBDOMAINS", default=SECURITY_HARDENING)
+SECURE_HSTS_PRELOAD = env_bool("SECURE_HSTS_PRELOAD", default=SECURITY_HARDENING)
+SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https") if SECURITY_HARDENING else None
+SECURE_CONTENT_TYPE_NOSNIFF = True
+SECURE_REFERRER_POLICY = config("SECURE_REFERRER_POLICY", default="same-origin")
+X_FRAME_OPTIONS = config("X_FRAME_OPTIONS", default="DENY")
+
+CACHES = {
+    "default": {
+        "BACKEND": "django.core.cache.backends.redis.RedisCache",
+        "LOCATION": REDIS_URL,
+        "KEY_PREFIX": "bonding",
+        "TIMEOUT": 300,
+    }
+}
+
+CELERY_BROKER_URL = REDIS_CELERY_URL
+CELERY_RESULT_BACKEND = REDIS_CELERY_URL
+CELERY_TASK_SERIALIZER = 'json'
+CELERY_ACCEPT_CONTENT = ['json']
+CELERY_TASK_IGNORE_RESULT = True
 
 CHANNEL_LAYERS = {
     "default": {
@@ -249,4 +310,3 @@ CHANNEL_LAYERS = {
 # https://docs.djangoproject.com/en/5.2/ref/settings/#default-auto-field
 
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
-CORS_ALLOW_ALL_ORIGINS = True

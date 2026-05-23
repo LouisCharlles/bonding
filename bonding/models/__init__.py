@@ -20,7 +20,6 @@ from .block import Block
 from .story import Story, StoryReaction, StoryView
 from .wallet import RewardEvent, UnlockSession, Wallet, WalletLedger
 from .verification import ProfileVerificationAttempt, VerificationSelfie
-from .institution import Institution, InstitutionDomain
 from .location_ping import UserLocationPing
 from .message import MessageReaction
 __all__ = [
@@ -52,8 +51,6 @@ __all__ = [
     'UnlockSession',
     'ProfileVerificationAttempt',
     'VerificationSelfie',
-    'Institution',
-    'InstitutionDomain',
     'UserLocationPing',
     'MessageReaction',
 ]

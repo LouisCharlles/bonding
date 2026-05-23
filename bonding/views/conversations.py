@@ -1,5 +1,6 @@
+from django.core.cache import cache
 from django.db.models import Q
-from rest_framework import permissions, viewsets
+from rest_framework import permissions, response, viewsets
 
 from ..models import Conversation
 from ..serializers import ConversationSerializer
@@ -9,6 +10,15 @@ from ..services.blocks import get_blocked_user_ids
 class ConversationViewSet(viewsets.ReadOnlyModelViewSet):
     serializer_class = ConversationSerializer
     permission_classes = [permissions.IsAuthenticated]
+
+    def list(self, request, *args, **kwargs):
+        cache_key = f"inbox:{request.user.id}"
+        cached = cache.get(cache_key)
+        if cached is not None:
+            return response.Response(cached)
+        result = super().list(request, *args, **kwargs)
+        cache.set(cache_key, result.data, timeout=30)
+        return result
 
     def get_queryset(self):
         queryset = Conversation.objects.select_related(

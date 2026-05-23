@@ -6,10 +6,10 @@ from rest_framework.decorators import action
 from rest_framework.exceptions import PermissionDenied, ValidationError
 from rest_framework.response import Response
 
-from ..models import Match, Story, StoryReaction, StoryView
-from ..serializers import StoryReactionSerializer, StorySerializer
-from ..services.blocks import get_blocked_user_ids
-from ..services.realtime import publish_to_users
+from ..models import Match, Message, Story, StoryReaction, StoryView
+from ..serializers import MessageSerializer, StoryReactionSerializer, StorySerializer
+from ..services.blocks import get_blocked_user_ids, is_blocked_pair
+from ..services.realtime import publish_group_event, publish_to_users
 
 
 class StoryViewSet(viewsets.ModelViewSet):
@@ -17,43 +17,102 @@ class StoryViewSet(viewsets.ModelViewSet):
     permission_classes = [permissions.IsAuthenticated]
     http_method_names = ["get", "post", "patch", "delete"]
 
-    def get_matched_user_ids(self, user):
-        matched_user_ids = []
-        matches = Match.objects.filter(Q(user1=user) | Q(user2=user), is_active=True)
-        for match in matches:
-            matched_user_ids.append(match.user2_id if match.user1_id == user.id else match.user1_id)
-        return matched_user_ids
+    def get_matched_user_ids(self, user, include_inactive=False):
+        qs = Match.objects.filter(Q(user1=user) | Q(user2=user))
+        if not include_inactive:
+            qs = qs.filter(is_active=True)
+        pairs = qs.values_list("user1_id", "user2_id")
+        return [u2 if u1 == user.id else u1 for u1, u2 in pairs]
 
-    def get_queryset(self):
+    def _base_queryset(self):
         user = self.request.user
         blocked_ids = get_blocked_user_ids(user)
-        matched_user_ids = self.get_matched_user_ids(user)
-
-        queryset = Story.objects.select_related("author").prefetch_related("views__viewer", "reactions__user").filter(
+        queryset = Story.objects.select_related(
+            "author",
+            "author__profile",
+        ).prefetch_related(
+            "views__viewer",
+            "reactions__user",
+        ).filter(
             is_active=True,
             expires_at__gt=timezone.now(),
         )
-
-        if self.action == "feed":
-            queryset = queryset.filter(
-                author_id__in=matched_user_ids,
-            ).filter(
-                Q(visibility=Story.VISIBILITY_MATCHES) | Q(visibility=Story.VISIBILITY_ALL)
-            )
-        elif self.action in {"register_view", "react", "retrieve"}:
-            queryset = queryset.filter(
-                Q(author=user)
-                | (
-                    Q(author_id__in=matched_user_ids)
-                    & (Q(visibility=Story.VISIBILITY_MATCHES) | Q(visibility=Story.VISIBILITY_ALL))
-                )
-            )
-        else:
-            queryset = queryset.filter(author=user)
-
         if blocked_ids:
             queryset = queryset.exclude(author_id__in=blocked_ids)
         return queryset
+
+    def _get_active_match_queryset(self, user):
+        return Match.objects.select_related("conversation", "user1", "user2").filter(
+            Q(user1=user) | Q(user2=user),
+            is_active=True,
+        )
+
+    def _get_visible_stories_queryset(self):
+        user = self.request.user
+        matches_data = self._get_active_match_queryset(user).values_list("user1_id", "user2_id")
+        match_ids = {u2 if u1 == user.id else u1 for u1, u2 in matches_data}
+        return self._base_queryset().filter(
+            Q(author=user)
+            | (
+                Q(author_id__in=match_ids)
+                & (Q(visibility=Story.VISIBILITY_MATCHES) | Q(visibility=Story.VISIBILITY_ALL))
+            )
+        )
+
+    def _get_feed_queryset(self):
+        return self._get_visible_stories_queryset().exclude(author=self.request.user)
+
+    def _get_match_for_story(self, story):
+        user = self.request.user
+        if story.author_id == user.id:
+            raise PermissionDenied("Nao e possivel responder ao proprio story.")
+
+        match = self._get_active_match_queryset(user).filter(
+            Q(user1=story.author) | Q(user2=story.author),
+        ).first()
+        if not match or not match.conversation_id:
+            raise PermissionDenied("Voce nao pode interagir com este story sem match ativo.")
+        if is_blocked_pair(user, story.author):
+            raise PermissionDenied("Voce nao pode interagir com stories deste usuario.")
+        return match
+
+    def _publish_message_created(self, message):
+        publish_group_event(
+            f"conversation_{message.conversation_id}",
+            {
+                "type": "message.created",
+                "entity": "message",
+                "conversation_id": message.conversation_id,
+                "data": MessageSerializer(message, context={"request": self.request}).data,
+                "timestamp": message.created_at.isoformat(),
+            },
+        )
+
+    def _create_story_reply_message(self, story, content):
+        normalized_content = str(content or "").strip()
+        if not normalized_content:
+            raise ValidationError({"content": "Conteudo e obrigatorio."})
+
+        match = self._get_match_for_story(story)
+        conversation = match.conversation
+        message = Message.objects.create(
+            conversation=conversation,
+            sender=self.request.user,
+            content=normalized_content,
+            message_type=Message.TYPE_STORY_REPLY,
+            story=story,
+        )
+        conversation.last_message = "Respondeu ao story"
+        conversation.save(update_fields=["last_message", "updated_at"])
+        self._publish_message_created(message)
+        return message
+
+    def get_queryset(self):
+        if self.action == "list":
+            return self._base_queryset().filter(author=self.request.user)
+        if self.action == "feed":
+            return self._get_feed_queryset()
+        return self._get_visible_stories_queryset()
 
     @transaction.atomic
     def create(self, request, *args, **kwargs):
@@ -89,7 +148,7 @@ class StoryViewSet(viewsets.ModelViewSet):
         return Response(serializer.data, status=status.HTTP_201_CREATED, headers=headers)
 
     def perform_create(self, serializer):
-        story = serializer.save(author=self.request.user)
+        story = serializer.save(author=self.request.user, is_active=True)
         self._publish_story_event(story, "story.created")
 
     def perform_update(self, serializer):
@@ -138,9 +197,21 @@ class StoryViewSet(viewsets.ModelViewSet):
             user=request.user,
             emoji=emoji,
         )
+        if created and story.author_id != request.user.id:
+            self._create_story_reply_message(story, emoji)
         serializer = StoryReactionSerializer(reaction)
         self._publish_story_event(story, "story.updated")
         return Response(serializer.data, status=status.HTTP_201_CREATED if created else status.HTTP_200_OK)
+
+    @action(detail=True, methods=["post"], url_path="reply")
+    def reply(self, request, pk=None):
+        story = self.get_object()
+        content = request.data.get("content", "")
+        message = self._create_story_reply_message(story, content)
+        self._publish_story_event(story, "story.updated")
+        serializer = MessageSerializer(message, context={"request": request})
+        return Response(serializer.data, status=status.HTTP_201_CREATED)
+
     def _publish_story_event(self, story, event_type):
         recipients = [story.author_id, *self.get_matched_user_ids(story.author)]
         publish_to_users(

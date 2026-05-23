@@ -104,12 +104,12 @@ class Profile(models.Model):
     spotify_track_url = models.URLField(blank=True)
     spotify_album_image_url = models.URLField(blank=True)
     spotify_preview_url = models.URLField(blank=True)
+    accent_color = models.CharField(max_length=7, default="#D71D29")
     min_preferred_age = models.PositiveIntegerField(default=18)
     max_preferred_age = models.PositiveIntegerField(default=99)
     max_distance_km = models.PositiveIntegerField(default=50)
     allow_video_calls = models.BooleanField(default=True)
     allow_date_suggestions = models.BooleanField(default=False)
-    allow_study_match = models.BooleanField(default=True)
     is_invisible_mode = models.BooleanField(default=False)
     interests = models.ManyToManyField(Interest, related_name="perfis", blank=True)
     preferences = models.ManyToManyField(

@@ -1,0 +1,269 @@
+{
+  "food": {
+    "existing_keywords": [
+      "comer",
+      "restaurante",
+      "jantar",
+      "almoço",
+      "sushi",
+      "pizza",
+      "comida",
+      "gastronomia",
+      "hamburguer",
+      "culinária",
+      "lanche",
+      "refeição"
+    ],
+    "suggested_new_keywords": [
+      "bora",
+      "gente",
+      "depois",
+      "meu",
+      "podia",
+      "hoje",
+      "tapioca",
+      "tava",
+      "afim",
+      "pastel",
+      "sair",
+      "pra",
+      "açaí",
+      "tigela",
+      "deve",
+      "ainda",
+      "aproveitar",
+      "opa",
+      "hambúrguer",
+      "aula",
+      "domingo",
+      "partiu",
+      "praia",
+      "patrão",
+      "queria",
+      "oii",
+      "gnt",
+      "criatura",
+      "onde",
+      "vai"
+    ],
+    "label": "Restaurantes"
+  },
+  "coffee": {
+    "existing_keywords": [
+      "café",
+      "cafezinho",
+      "cappuccino",
+      "coffee",
+      "barista",
+      "xícara"
+    ],
+    "suggested_new_keywords": [
+      "tomar",
+      "bora",
+      "gelado",
+      "gnt"
+    ],
+    "label": "Café"
+  },
+  "bars": {
+    "existing_keywords": [
+      "bar",
+      "cerveja",
+      "drink",
+      "chopp",
+      "happy hour",
+      "coquetél",
+      "beber",
+      "boteco"
+    ],
+    "suggested_new_keywords": [
+      "mesmo",
+      "barco",
+      "bora",
+      "roots",
+      "tomar",
+      "gente",
+      "tarde",
+      "opa",
+      "num",
+      "barzinho",
+      "simbora",
+      "pensei",
+      "aff",
+      "fábrica",
+      "kkkkkkk",
+      "barcooo",
+      "shopping",
+      "socorro",
+      "barrrco",
+      "podia",
+      "partiu",
+      "léo",
+      "hahaha",
+      "oxe",
+      "meu",
+      "gata",
+      "sumida"
+    ],
+    "label": "Bares"
+  },
+  "outdoors": {
+    "existing_keywords": [
+      "parque",
+      "praia",
+      "trilha",
+      "natureza",
+      "piquenique",
+      "jardim",
+      "ao ar livre",
+      "caminhada"
+    ],
+    "suggested_new_keywords": [
+      "hoje",
+      "combinava",
+      "pra",
+      "meu",
+      "são",
+      "marcos",
+      "bora",
+      "comer",
+      "patrão",
+      "partiu",
+      "tarde",
+      "gente",
+      "simbora",
+      "calhau",
+      "tava",
+      "afim",
+      "mto",
+      "pensei",
+      "olho",
+      "água"
+    ],
+    "label": "Ao ar livre"
+  },
+  "arts": {
+    "existing_keywords": [
+      "museu",
+      "arte",
+      "galeria",
+      "teatro",
+      "exposição",
+      "cultura",
+      "pintura",
+      "escultura"
+    ],
+    "suggested_new_keywords": [],
+    "label": "Arte e Cultura"
+  },
+  "movies": {
+    "existing_keywords": [
+      "cinema",
+      "filme",
+      "sessão",
+      "pipoca",
+      "estreia",
+      "série",
+      "animação"
+    ],
+    "suggested_new_keywords": [
+      "pegar",
+      "assistir",
+      "bora",
+      "topa",
+      "depois",
+      "gata",
+      "madrugada",
+      "mesmo",
+      "hoje"
+    ],
+    "label": "Cinema"
+  },
+  "nightlife": {
+    "existing_keywords": [
+      "balada",
+      "festa",
+      "show",
+      "boate",
+      "noite",
+      "clube",
+      "dançar",
+      "rave"
+    ],
+    "suggested_new_keywords": [
+      "litorânea",
+      "fim",
+      "vai",
+      "gente",
+      "podia",
+      "aproveitar",
+      "hoje",
+      "semana",
+      "chegou",
+      "finalmente",
+      "queria",
+      "pra",
+      "topa",
+      "sábado"
+    ],
+    "label": "Vida noturna"
+  },
+  "sports": {
+    "existing_keywords": [
+      "esporte",
+      "academia",
+      "futebol",
+      "corrida",
+      "bike",
+      "yoga",
+      "natação",
+      "crossfit",
+      "tênis",
+      "vôlei"
+    ],
+    "suggested_new_keywords": [
+      "tava",
+      "lotada",
+      "demais",
+      "peguei",
+      "pro",
+      "araçagy",
+      "quase",
+      "enlouqueci",
+      "meu",
+      "estágio",
+      "foi",
+      "puxado"
+    ],
+    "label": "Esportes"
+  },
+  "shopping": {
+    "existing_keywords": [
+      "shopping",
+      "loja",
+      "comprar",
+      "moda",
+      "roupa",
+      "outlet"
+    ],
+    "suggested_new_keywords": [
+      "bora",
+      "rolê",
+      "golden",
+      "dar",
+      "meu",
+      "partiu",
+      "hoje",
+      "anima",
+      "comigo",
+      "simbora",
+      "tarde",
+      "deus",
+      "sumiu",
+      "tava",
+      "rio",
+      "anil"
+    ],
+    "label": "Shopping"
+  }
+}

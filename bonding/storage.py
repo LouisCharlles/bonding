@@ -23,6 +23,7 @@ class SupabaseStorage(Storage):
         self.base_url = _clean_base_url(base_url or getattr(settings, "SUPABASE_URL", ""))
         self.bucket = bucket or getattr(settings, "SUPABASE_STORAGE_BUCKET", "")
         self.service_role_key = service_role_key or getattr(settings, "SUPABASE_SERVICE_ROLE_KEY", "")
+        self.signed_url_ttl = int(getattr(settings, "SUPABASE_SIGNED_URL_TTL", 900))
 
     @property
     def is_configured(self) -> bool:
@@ -32,9 +33,9 @@ class SupabaseStorage(Storage):
         encoded_name = quote(name.lstrip("/"), safe="/")
         return f"{self.base_url}/storage/v1/object/{self.bucket}/{encoded_name}"
 
-    def _build_public_url(self, name: str) -> str:
+    def _build_signed_url_endpoint(self, name: str) -> str:
         encoded_name = quote(name.lstrip("/"), safe="/")
-        return f"{self.base_url}/storage/v1/object/public/{self.bucket}/{encoded_name}"
+        return f"{self.base_url}/storage/v1/object/sign/{self.bucket}/{encoded_name}"
 
     def _request(self, method: str, url: str, data: bytes | None = None, content_type: str | None = None):
         headers = {
@@ -43,7 +44,7 @@ class SupabaseStorage(Storage):
         }
         if content_type:
             headers["Content-Type"] = content_type
-        if method in {"POST", "PUT"}:
+        if method == "PUT":
             headers["x-upsert"] = "true"
 
         request = Request(url, data=data, headers=headers, method=method)
@@ -54,6 +55,33 @@ class SupabaseStorage(Storage):
             raise RuntimeError(
                 f"Supabase Storage {method} {url} falhou com status {exc.code}: {details}"
             ) from exc
+
+    def _create_signed_url(self, name: str) -> str:
+        with self._request(
+            "POST",
+            self._build_signed_url_endpoint(name),
+            data=json.dumps({"expiresIn": self.signed_url_ttl}).encode("utf-8"),
+            content_type="application/json",
+        ) as response:
+            payload = json.loads(response.read().decode("utf-8"))
+
+        signed_path = payload.get("signedURL") or payload.get("signedUrl")
+        if not signed_path:
+            raise RuntimeError("Supabase Storage nao retornou signedURL para o objeto solicitado.")
+
+        if signed_path.startswith("http://") or signed_path.startswith("https://"):
+            return signed_path
+
+        normalized_path = signed_path.strip()
+        if normalized_path.startswith("/storage/v1/"):
+            return f"{self.base_url}{normalized_path}"
+        if normalized_path.startswith("/object/"):
+            return f"{self.base_url}/storage/v1{normalized_path}"
+        if normalized_path.startswith("object/"):
+            return f"{self.base_url}/storage/v1/{normalized_path}"
+        if normalized_path.startswith("/"):
+            return f"{self.base_url}{normalized_path}"
+        return f"{self.base_url}/{normalized_path}"
 
     def _open(self, name, mode="rb"):
         if not self.is_configured:
@@ -109,7 +137,9 @@ class SupabaseStorage(Storage):
         return False
 
     def url(self, name):
-        return self._build_public_url(name)
+        if not self.is_configured:
+            raise RuntimeError("Supabase Storage não está configurado.")
+        return self._create_signed_url(name)
 
     def size(self, name):
         if not self.is_configured or not name:

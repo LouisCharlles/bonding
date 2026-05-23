@@ -1,6 +1,6 @@
 from django.db.models.signals import post_save
 from django.dispatch import receiver
-from .models import Connection, Match, Message, Notification, StoryReaction, User, Wallet
+from .models import Connection, Match, Message, Notification, User, Wallet
 
 
 @receiver(post_save, sender=Connection)
@@ -59,17 +59,5 @@ def ensure_wallet_for_user(sender, instance, created, **kwargs):
     if created:
         Wallet.objects.get_or_create(user=instance)
 
-
-@receiver(post_save, sender=StoryReaction)
-def notify_story_reaction(sender, instance, created, **kwargs):
-    if not created or instance.story.author_id == instance.user_id:
-        return
-
-    Notification.objects.create(
-        recipient=instance.story.author,
-        notification_type="NEW_CONNECTION",
-        message=f"{instance.user.profile.name} reagiu ao seu story com {instance.emoji}.",
-        target_object_id=str(instance.story.id),
-    )
 
 

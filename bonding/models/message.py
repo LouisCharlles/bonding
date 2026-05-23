@@ -1,5 +1,8 @@
 from django.db import models
 from django.db.models import Q
+
+from bonding.security_crypto import EncryptedJSONField
+
 from .conversation import Conversation
 from .user import User
 from ..storage import get_photo_storage
@@ -10,6 +13,7 @@ class Message(models.Model):
     TYPE_IMAGE = "image"
     TYPE_VIDEO = "video"
     TYPE_STORY_REPLY = "story_reply"
+    TYPE_DATE_SUGGESTION = "date_suggestion"
 
     conversation = models.ForeignKey(Conversation, related_name='messages', on_delete=models.CASCADE)
     sender = models.ForeignKey(User, related_name='sent_messages', on_delete=models.CASCADE)
@@ -21,9 +25,11 @@ class Message(models.Model):
             (TYPE_IMAGE, "Imagem"),
             (TYPE_VIDEO, "Video"),
             (TYPE_STORY_REPLY, "Resposta de story"),
+            (TYPE_DATE_SUGGESTION, "Sugestão de date"),
         ],
         default=TYPE_TEXT,
     )
+    provider_payload = EncryptedJSONField(blank=True, null=True)
     media = models.FileField(
         upload_to="message_media/",
         storage=get_photo_storage(),

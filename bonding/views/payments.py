@@ -5,10 +5,15 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from ..models import PremiumPlan, Profile, Subscription
-from ..services.external_integrations import IntegrationError, create_stripe_payment_intent, verify_stripe_signature
+from ..services.external_integrations import (
+    IntegrationError,
+    create_abacatepay_billing,
+    create_abacatepay_pix,
+    verify_abacatepay_webhook,
+)
 
 
-class StripePaymentIntentView(APIView):
+class AbacatePayIntentView(APIView):
     permission_classes = [permissions.IsAuthenticated]
 
     def post(self, request):
@@ -17,44 +22,56 @@ class StripePaymentIntentView(APIView):
         if not plan:
             return Response({"detail": "Plano invalido."}, status=404)
 
+        amount = int(plan.price_monthly * 100)
+        method = request.data.get("method", "card")
+        cpf = request.data.get("cpf", "")
+
+        if method == "pix" and not cpf:
+            return Response({"detail": "CPF obrigatorio para pagamento via PIX."}, status=400)
+
         try:
-            intent = create_stripe_payment_intent(
-                int(plan.price_monthly * 100),
-                request.user.email,
-                metadata={"user_id": request.user.id, "plan_id": plan.id},
-            )
+            if method == "pix":
+                result = create_abacatepay_pix(amount, request.user, plan, cpf)
+                return Response({
+                    "pix_code": result["pix_code"],
+                    "qr_code_image": result["qr_code_image"],
+                }, status=201)
+
+            result = create_abacatepay_billing(amount, request.user, plan, cpf)
+            return Response({"checkout_url": result["checkout_url"]}, status=201)
+
         except IntegrationError as error:
             return Response({"detail": str(error)}, status=400)
 
-        return Response({
-            "payment_intent_id": intent.get("id"),
-            "client_secret": intent.get("client_secret"),
-        }, status=201)
 
-
-class StripeWebhookView(APIView):
+class AbacatePayWebhookView(APIView):
     permission_classes = [permissions.AllowAny]
 
     def post(self, request):
-        payload = request.body
-        signature = request.headers.get("Stripe-Signature")
+        token = request.query_params.get("token", "")
         try:
-            verify_stripe_signature(payload, signature)
+            verify_abacatepay_webhook(token)
         except IntegrationError as error:
             return Response({"detail": str(error)}, status=400)
 
-        event = json.loads(payload.decode("utf-8"))
-        event_type = event.get("type")
-        if event_type == "payment_intent.succeeded":
-            metadata = event.get("data", {}).get("object", {}).get("metadata", {})
+        try:
+            event = json.loads(request.body.decode("utf-8"))
+        except (json.JSONDecodeError, UnicodeDecodeError):
+            return Response({"detail": "Payload invalido."}, status=400)
+
+        event_type = event.get("event")
+        # Ambos billing.paid e pixQrCode.paid carregam metadata em event.data
+        if event_type in ("billing.paid", "pixQrCode.paid"):
+            metadata = event.get("data", {}).get("metadata", {})
             user_id = metadata.get("user_id")
             plan_id = metadata.get("plan_id")
             plan = PremiumPlan.objects.filter(id=plan_id).first()
             if user_id and plan:
-                subscription = Subscription.objects.create(
+                Subscription.objects.create(
                     user_id=user_id,
                     plan=plan,
                     status=Subscription.STATUS_ACTIVE,
                 )
                 Profile.objects.filter(user_id=user_id).update(premium_tier=plan.code)
+
         return Response({"received": True}, status=200)

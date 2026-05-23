@@ -29,8 +29,6 @@ from .models import (
     WalletLedger,
     RewardEvent,
     UnlockSession,
-    Institution,
-    InstitutionDomain,
     UserLocationPing,
 )
 
@@ -59,8 +57,6 @@ admin.site.register(RewardEvent)
 admin.site.register(UnlockSession)
 admin.site.register(ProfileVerificationAttempt)
 admin.site.register(VerificationSelfie)
-admin.site.register(Institution)
-admin.site.register(InstitutionDomain)
 admin.site.register(UserLocationPing)
 admin.site.register(PushDevice)
 admin.site.register(VideoCallSession)

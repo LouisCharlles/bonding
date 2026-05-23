@@ -67,6 +67,27 @@ def award_video_ribbons(user, count=2):
     return True, "Recompensa concedida."
 
 
+@transaction.atomic
+def consume_rewind_ribbon(user):
+    from ..models import Profile
+    profile = getattr(user, "profile", None)
+    if profile and profile.premium_tier != Profile.PREMIUM_FREE:
+        return
+    wallet = get_or_create_wallet(user)
+    wallet.refresh_from_db(fields=["ribbons_balance"])
+    if wallet.ribbons_balance < 25:
+        raise ValueError("Saldo insuficiente. Voce precisa de 25 lacos para reverter.")
+    wallet.ribbons_balance -= 25
+    _normalize_balances(wallet)
+    wallet.save(update_fields=["ribbons_balance", "hearts_balance", "updated_at"])
+    WalletLedger.objects.create(
+        wallet=wallet,
+        entry_type=WalletLedger.TYPE_SPEND,
+        ribbons_delta=-25,
+        description="Rewind: reverter ultima interacao",
+    )
+
+
 def can_unlock_likes_session(user):
     return UnlockSession.objects.filter(
         user=user,

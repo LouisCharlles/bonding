@@ -1,3 +1,4 @@
+from django.core.cache import cache
 from django.db import IntegrityError, transaction
 from django.db.models import Q
 from django.utils import timezone
@@ -18,7 +19,14 @@ class MessageViewSet(viewsets.ModelViewSet):
     http_method_names = ["get", "post", "patch"]
 
     def get_queryset(self):
-        queryset = Message.objects.select_related("sender", "conversation").filter(
+        queryset = Message.objects.select_related(
+            "sender",
+            "conversation",
+            "story",
+            "story__author",
+        ).prefetch_related(
+            "reactions__user",
+        ).filter(
             Q(conversation__user1=self.request.user) | Q(conversation__user2=self.request.user)
         )
         blocked_ids = get_blocked_user_ids(self.request.user)
@@ -42,6 +50,13 @@ class MessageViewSet(viewsets.ModelViewSet):
                 "data": payload,
                 "timestamp": message.created_at.isoformat(),
             },
+        )
+
+    def _get_message_preview(self, message):
+        return message.content or (
+            "Respondeu ao story"
+            if message.message_type == Message.TYPE_STORY_REPLY
+            else message.message_type
         )
 
     @transaction.atomic
@@ -84,9 +99,23 @@ class MessageViewSet(viewsets.ModelViewSet):
             raise PermissionDenied("Voce nao pode enviar mensagens para este usuario.")
 
         message = serializer.save(sender=self.request.user)
-        conversation.last_message = message.content or message.message_type
+        conversation.last_message = self._get_message_preview(message)
         conversation.save(update_fields=["last_message", "updated_at"])
+        cache.delete_many([f"inbox:{conversation.user1_id}", f"inbox:{conversation.user2_id}"])
         self._publish_message_created(message)
+        self._maybe_trigger_intent_analysis(message)
+
+    def _maybe_trigger_intent_analysis(self, message):
+        if message.message_type != Message.TYPE_TEXT:
+            return
+        count = Message.objects.filter(
+            conversation_id=message.conversation_id,
+            message_type=Message.TYPE_TEXT,
+            is_system=False,
+        ).count()
+        if count >= 10 and count % 10 == 0:
+            from ..tasks import check_date_intent_task
+            check_date_intent_task.delay(message.conversation_id)
 
     @action(detail=False, methods=["post"], url_path="mark-read")
     def mark_read(self, request):

@@ -10,7 +10,6 @@ from .models import (
     Connection,
     Conversation,
     Interest,
-    InstitutionDomain,
     Location,
     Match,
     Message,
@@ -37,6 +36,33 @@ from .models import (
 from .services.presence import is_profile_online, touch_user_presence
 
 User = get_user_model()
+
+
+def _get_display_name(user):
+    try:
+        profile = user.profile
+    except Profile.DoesNotExist:
+        profile = None
+    if profile and getattr(profile, "name", None) and str(profile.name).strip():
+        return str(profile.name).strip()
+    email = getattr(user, "email", "") or ""
+    return email.split("@", 1)[0] if "@" in email else email
+
+
+def _resolve_media_url(file_field, request):
+    if not file_field:
+        return None
+    try:
+        url = file_field.url # Aqui o Supabase é acionado
+    except ValueError:
+        # Previne erro caso o campo de arquivo esteja inconsistente no banco
+        return None
+        
+    if url.startswith("http://") or url.startswith("https://"):
+        return url
+    if request:
+        return request.build_absolute_uri(url)
+    return url
 
 
 class CustomTokenObtainPairSerializer(TokenObtainPairSerializer):
@@ -102,15 +128,7 @@ class PhotoSerializer(serializers.ModelSerializer):
         read_only_fields = ["id", "updated_at"]
 
     def get_image_url(self, obj):
-        if not obj.image:
-            return None
-        url = obj.image.url
-        if url.startswith("http://") or url.startswith("https://"):
-            return url
-        request = self.context.get("request")
-        if request:
-            return request.build_absolute_uri(url)
-        return url
+        return _resolve_media_url(obj.image, self.context.get("request"))
 
 
 class StoryViewSerializer(serializers.ModelSerializer):
@@ -124,15 +142,20 @@ class StoryViewSerializer(serializers.ModelSerializer):
 
 class StoryReactionSerializer(serializers.ModelSerializer):
     user = UserSummarySerializer(read_only=True)
+    user_display_name = serializers.SerializerMethodField()
 
     class Meta:
         model = StoryReaction
-        fields = ["id", "user", "emoji", "created_at"]
-        read_only_fields = ["id", "user", "created_at"]
+        fields = ["id", "user", "user_display_name", "emoji", "created_at"]
+        read_only_fields = ["id", "user", "user_display_name", "created_at"]
+
+    def get_user_display_name(self, obj):
+        return _get_display_name(obj.user)
 
 
 class StorySerializer(serializers.ModelSerializer):
     author = UserSummarySerializer(read_only=True)
+    author_display_name = serializers.SerializerMethodField()
     reactions = StoryReactionSerializer(many=True, read_only=True)
     views = StoryViewSerializer(many=True, read_only=True)
     media_url = serializers.SerializerMethodField()
@@ -143,6 +166,7 @@ class StorySerializer(serializers.ModelSerializer):
         fields = [
             "id",
             "author",
+            "author_display_name",
             "media_type",
             "media",
             "media_url",
@@ -157,21 +181,49 @@ class StorySerializer(serializers.ModelSerializer):
             "views",
             "reactions",
         ]
-        read_only_fields = ["id", "author", "created_at", "updated_at", "viewers_count", "views", "reactions"]
+        read_only_fields = [
+            "id",
+            "author",
+            "author_display_name",
+            "created_at",
+            "updated_at",
+            "viewers_count",
+            "views",
+            "reactions",
+        ]
+
+    def get_author_display_name(self, obj):
+        return _get_display_name(obj.author)
 
     def get_media_url(self, obj):
-        if not obj.media:
-            return None
-        url = obj.media.url
-        if url.startswith("http://") or url.startswith("https://"):
-            return url
-        request = self.context.get("request")
-        if request:
-            return request.build_absolute_uri(url)
-        return url
+        return _resolve_media_url(obj.media, self.context.get("request"))
 
     def get_viewers_count(self, obj):
         return obj.views.count()
+
+
+class StoryMessageContextSerializer(serializers.ModelSerializer):
+    author = UserSummarySerializer(read_only=True)
+    author_display_name = serializers.SerializerMethodField()
+    media_url = serializers.SerializerMethodField()
+
+    class Meta:
+        model = Story
+        fields = [
+            "id",
+            "author",
+            "author_display_name",
+            "media_type",
+            "media_url",
+            "caption",
+        ]
+        read_only_fields = fields
+
+    def get_author_display_name(self, obj):
+        return _get_display_name(obj.author)
+
+    def get_media_url(self, obj):
+        return _resolve_media_url(obj.media, self.context.get("request"))
 
 
 class ProfileSerializer(serializers.ModelSerializer):
@@ -233,12 +285,12 @@ class ProfileSerializer(serializers.ModelSerializer):
             "spotify_track_url",
             "spotify_album_image_url",
             "spotify_preview_url",
+            "accent_color",
             "min_preferred_age",
             "max_preferred_age",
             "max_distance_km",
             "allow_video_calls",
             "allow_date_suggestions",
-            "allow_study_match",
             "is_invisible_mode",
             "interests",
             "preferences",
@@ -294,6 +346,21 @@ class ProfileSerializer(serializers.ModelSerializer):
 
     def get_is_online(self, obj):
         return is_profile_online(obj)
+
+    def validate_accent_color(self, value):
+        if not value:
+            return "#D71D29"
+
+        normalized = value.strip()
+        if len(normalized) != 7 or not normalized.startswith("#"):
+            raise serializers.ValidationError("A cor deve estar no formato hexadecimal #RRGGBB.")
+
+        try:
+            int(normalized[1:], 16)
+        except ValueError as error:
+            raise serializers.ValidationError("A cor deve estar no formato hexadecimal #RRGGBB.") from error
+
+        return normalized.upper()
 
     def create(self, validated_data):
         interests = validated_data.pop("interests", [])
@@ -368,11 +435,6 @@ class RegisterSerializer(serializers.ModelSerializer):
         if attrs["password"] != attrs["confirm_password"]:
             raise serializers.ValidationError(
                 {"confirm_password": "As senhas nao correspondem."}
-            )
-        email_domain = attrs["email"].split("@")[-1].lower().strip()
-        if not InstitutionDomain.objects.filter(domain=email_domain, is_active=True, institution__is_active=True).exists():
-            raise serializers.ValidationError(
-                {"email": "Este e-mail institucional ainda nao esta aprovado para cadastro."}
             )
         return attrs
 
@@ -477,6 +539,7 @@ class MessageSerializer(serializers.ModelSerializer):
         required=False,
         allow_null=True,
     )
+    story_context = serializers.SerializerMethodField()
     media_url = serializers.SerializerMethodField()
     reactions = serializers.SerializerMethodField()
 
@@ -491,6 +554,7 @@ class MessageSerializer(serializers.ModelSerializer):
             "media",
             "media_url",
             "story",
+            "story_context",
             "reply_to_message",
             "is_view_once",
             "client_request_id",
@@ -499,32 +563,37 @@ class MessageSerializer(serializers.ModelSerializer):
             "created_at",
             "read",
             "reactions",
+            "provider_payload",
         ]
         read_only_fields = ["id", "sender", "is_system", "created_at", "read"]
 
     def get_media_url(self, obj):
-        if not obj.media:
-            return None
-        url = obj.media.url
-        if url.startswith("http://") or url.startswith("https://"):
-            return url
-        request = self.context.get("request")
-        if request:
-            return request.build_absolute_uri(url)
-        return url
+        return _resolve_media_url(obj.media, self.context.get("request"))
 
     def get_reactions(self, obj):
         return MessageReactionSerializer(obj.reactions.all(), many=True).data
+
+    def get_story_context(self, obj):
+        if not obj.story:
+            return None
+        return StoryMessageContextSerializer(obj.story, context=self.context).data
 
     def validate(self, attrs):
         is_view_once = attrs.get("is_view_once", False)
         media = attrs.get("media")
         message_type = attrs.get("message_type")
+        story = attrs.get("story")
 
         if is_view_once and not media:
             raise serializers.ValidationError({"is_view_once": "Visualizacao unica so pode ser usada com midia."})
         if is_view_once and message_type not in [Message.TYPE_IMAGE, Message.TYPE_VIDEO]:
             raise serializers.ValidationError({"is_view_once": "Visualizacao unica so esta disponivel para imagem ou video."})
+        if message_type == Message.TYPE_STORY_REPLY and not story:
+            raise serializers.ValidationError({"story": "Story e obrigatorio para resposta de story."})
+        if message_type == Message.TYPE_DATE_SUGGESTION:
+            provider_payload = attrs.get("provider_payload")
+            if not provider_payload or not provider_payload.get("name") or not provider_payload.get("maps_url"):
+                raise serializers.ValidationError({"provider_payload": "Sugestao de date requer name e maps_url no provider_payload."})
         return attrs
 
 
@@ -660,7 +729,7 @@ class VerificationSelfieSerializer(serializers.ModelSerializer):
     class Meta:
         model = VerificationSelfie
         fields = ["id", "attempt", "image", "brightness_score", "face_detected", "accessories_detected", "created_at"]
-        read_only_fields = ["id", "brightness_score", "face_detected", "accessories_detected", "created_at"]
+        read_only_fields = ["id", "attempt", "brightness_score", "face_detected", "accessories_detected", "created_at"]
 
 
 class PushDeviceSerializer(serializers.ModelSerializer):

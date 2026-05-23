@@ -1,5 +1,7 @@
 from django.db import models
 
+from bonding.security_crypto import EncryptedJSONField
+
 from .profile import Profile
 from ..storage import get_photo_storage
 
@@ -28,7 +30,7 @@ class ProfileVerificationAttempt(models.Model):
     score = models.FloatField(blank=True, null=True)
     rejection_reason = models.TextField(blank=True)
     provider = models.CharField(max_length=40, default="aws_rekognition")
-    provider_payload = models.JSONField(default=dict, blank=True)
+    provider_payload = EncryptedJSONField(default=dict, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
