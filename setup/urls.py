@@ -21,15 +21,21 @@ from django.conf import settings
 from rest_framework.routers import DefaultRouter
 # from bonding.views.webhooks import GoogleRewardWebhookView
 from bonding.views import (
+    AccountDeactivateView,
+    AccountDeleteView,
     BlockViewSet,
     ConnectionViewSet,
+    ConsentCreateView,
+    ConsentMeView,
     ConversationDateReadinessView,
     ConversationViewSet,
     CupidoRecommendationsView,
     CustomTokenObtainPairView,
     CustomTokenRefreshView,
     ForgotPasswordView,
+    HealthCheckView,
     InterestViewSet,
+    LegalDocumentCurrentView,
     SpotifyTrackSearchView,
     LocationCreateOrRetrieveView,
     UserLocationPingView,
@@ -75,6 +81,7 @@ router.register(r'wallet', WalletViewSet, basename='wallet')
 router.register(r'push-devices', PushDeviceViewSet, basename='push-device')
 router.register(r'video-calls', VideoCallSessionViewSet, basename='video-call')
 urlpatterns = [
+    path('health/', HealthCheckView.as_view(), name='health-check'),
     path('admin/', admin.site.urls),
     path('', include(router.urls)),
     path('locations/', LocationCreateOrRetrieveView.as_view(), name='location-create-retrieve'),
@@ -86,6 +93,11 @@ urlpatterns = [
     path('auth/me/', MeView.as_view(), name='me'),
     path('presence/heartbeat/', PresenceHeartbeatView.as_view(), name='presence-heartbeat'),
     path('verification/attempts/', ProfileVerificationAttemptView.as_view(), name='profile-verification-attempts'),
+    path('legal/documents/current/', LegalDocumentCurrentView.as_view(), name='legal-documents-current'),
+    path('consent/', ConsentCreateView.as_view(), name='consent-create'),
+    path('consent/me/', ConsentMeView.as_view(), name='consent-me'),
+    path('account/deactivate/', AccountDeactivateView.as_view(), name='account-deactivate'),
+    path('account/delete/', AccountDeleteView.as_view(), name='account-delete'),
     path('integrations/spotify/search/', SpotifyTrackSearchView.as_view(), name='spotify-track-search'),
     path('payments/intents/', AbacatePayIntentView.as_view(), name='abacatepay-intent'),
     path('payments/webhooks/abacatepay/', AbacatePayWebhookView.as_view(), name='abacatepay-webhook'),

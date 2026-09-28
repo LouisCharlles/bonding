@@ -1,6 +1,5 @@
 import json
 import base64
-import random
 from math import radians, sin, cos, sqrt, atan2
 from urllib.error import HTTPError
 from urllib.parse import urlencode
@@ -127,24 +126,6 @@ def verify_abacatepay_webhook(request_token):
         raise IntegrationError("Token do webhook AbacatePay invalido.")
 
 
-def get_google_midpoint_suggestions(origin, destination, radius_meters=2500):
-    if not getattr(settings, "GOOGLE_MAPS_API_KEY", ""):
-        raise IntegrationError("GOOGLE_MAPS_API_KEY nao configurada.")
-
-    midpoint = ((origin[0] + destination[0]) / 2, (origin[1] + destination[1]) / 2)
-    query = urlencode({
-        "location": f"{midpoint[0]},{midpoint[1]}",
-        "radius": radius_meters,
-        "keyword": "cafeteria coffee date",
-        "key": settings.GOOGLE_MAPS_API_KEY,
-    })
-    response = _http_json(
-        "GET",
-        f"https://maps.googleapis.com/maps/api/place/nearbysearch/json?{query}",
-    )
-    return response.get("results", [])[:5]
-
-
 # OpenStreetMap intent → OSM tags
 _OSM_INTENT_TAGS = {
     "friendship": ["amenity=cafe", "leisure=park", "tourism=museum", "amenity=restaurant"],
@@ -210,6 +191,34 @@ _QUERY_TERM_MAP: dict[str, list[tuple[str, str, str | None, str | None]]] = {
 }
 
 
+def compute_metadata_completeness_score(tags: dict) -> float:
+    """Deterministic proxy for listing quality (0.0-1.0), NOT a real rating —
+    OSM has no rating data. Scores presence of secondary metadata (opening
+    hours, contact info, full address) beyond the name/location that are
+    always required for a result to exist at all."""
+    tags = tags or {}
+    signals = [
+        bool(tags.get("opening_hours")),
+        bool(tags.get("phone") or tags.get("contact:phone")),
+        bool(tags.get("website") or tags.get("contact:website")),
+        bool((tags.get("addr:housenumber") or "") and (tags.get("addr:street") or "")),
+    ]
+    return round(sum(signals) / len(signals), 2)
+
+
+def deterministic_prefilter_score(place: dict, max_radius_km: float) -> float:
+    """Combines proximity and metadata completeness into the deterministic
+    ranking score used to shortlist candidates before the LLM semantic
+    rerank. Mutates `place` with a `deterministic_score` key and returns it."""
+    distance_km = place.get("distance_km") or 0.0
+    max_radius_km = max_radius_km or 1.0
+    proximity = max(0.0, 1 - min(distance_km / max_radius_km, 1.0))
+    completeness = place.get("metadata_completeness_score") or 0.0
+    score = proximity * 0.6 + completeness * 0.4
+    place["deterministic_score"] = round(score, 4)
+    return place["deterministic_score"]
+
+
 def _osm_place_to_result(element, ref_lat, ref_lon):
     lat = element.get("lat") or element.get("center", {}).get("lat")
     lon = element.get("lon") or element.get("center", {}).get("lon")
@@ -234,44 +243,77 @@ def _osm_place_to_result(element, ref_lat, ref_lon):
         "latitude": lat,
         "longitude": lon,
         "maps_url": f"https://www.google.com/maps/search/?api=1&query={lat},{lon}",
+        "metadata_completeness_score": compute_metadata_completeness_score(tags),
     }
 
 
+_OVERPASS_RETRYABLE_STATUS_CODES = {502, 503, 504}
+_OVERPASS_MAX_ATTEMPTS = 3
+_OVERPASS_RETRY_DELAY_SECONDS = 2
+
+
 def _overpass_request(overpass_ql):
+    import time
     from urllib.parse import quote_plus
     body = f"data={quote_plus(overpass_ql)}".encode("utf-8")
-    return _http_json(
-        "POST",
-        "https://overpass-api.de/api/interpreter",
-        headers={
-            "Content-Type": "application/x-www-form-urlencoded",
-            "Accept": "application/json",
-        },
-        data=body,
-    )
+
+    # The public overpass-api.de instance is a shared, rate-limited service —
+    # it occasionally answers with a transient 502/503/504 when busy, even for
+    # well-formed, idempotent read-only queries. Retry those a couple of times
+    # with a short backoff before giving up (any other error is not retried).
+    last_error = None
+    for attempt in range(1, _OVERPASS_MAX_ATTEMPTS + 1):
+        try:
+            return _http_json(
+                "POST",
+                "https://overpass-api.de/api/interpreter",
+                headers={
+                    "Content-Type": "application/x-www-form-urlencoded",
+                    "Accept": "application/json",
+                },
+                data=body,
+            )
+        except IntegrationError as error:
+            status_code = getattr(getattr(error, "__cause__", None), "code", None)
+            last_error = error
+            if status_code not in _OVERPASS_RETRYABLE_STATUS_CODES or attempt == _OVERPASS_MAX_ATTEMPTS:
+                raise
+            time.sleep(_OVERPASS_RETRY_DELAY_SECONDS * attempt)
+    raise last_error
 
 
-def _overpass_category_search(latitude, longitude, radius_meters, osm_tags, limit=50):
+def _overpass_category_search(latitude, longitude, radius_meters, osm_tags, limit=20, raw_limit=50):
     filters = []
     for tag in osm_tags:
         key, _, value = tag.partition("=")
         for elem in ("node", "way"):
             filters.append(f'  {elem}["{key}"="{value}"](around:{radius_meters},{latitude},{longitude});')
 
-    query = "[out:json][timeout:25];\n(\n" + "\n".join(filters) + f"\n);\nout center {limit};"
+    query = "[out:json][timeout:25];\n(\n" + "\n".join(filters) + f"\n);\nout center {raw_limit};"
     response = _overpass_request(query)
     results = []
+    seen_keys = set()
     for element in response.get("elements", []):
+        osm_key = (element.get("type"), element.get("id"))
+        if osm_key in seen_keys:
+            continue
         result = _osm_place_to_result(element, latitude, longitude)
-        if result:
-            results.append(result)
-    random.shuffle(results)
+        if not result:
+            continue
+        seen_keys.add(osm_key)
+        results.append(result)
+
+    max_radius_km = radius_meters / 1000
+    for result in results:
+        deterministic_prefilter_score(result, max_radius_km)
+    results.sort(key=lambda r: r["deterministic_score"], reverse=True)
     return results[:limit]
 
 
-def _overpass_name_search(latitude, longitude, radius_meters, query, limit=30):
+def _overpass_name_search(latitude, longitude, radius_meters, query, limit=20, raw_limit=30):
     raw = query.lower().strip()
     tag_tuples = _QUERY_TERM_MAP.get(raw)
+    max_radius_km = radius_meters / 1000
 
     if tag_tuples:
         # Fast path: indexed tag lookup for known PT terms
@@ -288,7 +330,7 @@ def _overpass_name_search(latitude, longitude, radius_meters, query, limit=30):
                         f'  {elem}["{primary_key}"="{primary_val}"]'
                         f'(around:{radius_meters},{latitude},{longitude});'
                     )
-        query_ql = "[out:json][timeout:25];\n(\n" + "\n".join(filters) + f"\n);\nout center {limit};"
+        query_ql = "[out:json][timeout:25];\n(\n" + "\n".join(filters) + f"\n);\nout center {raw_limit};"
         response = _overpass_request(query_ql)
     else:
         # Fallback: Nominatim free-text geocode search
@@ -296,7 +338,7 @@ def _overpass_name_search(latitude, longitude, radius_meters, query, limit=30):
         params = _urlencode({
             "q": raw,
             "format": "jsonv2",
-            "limit": limit,
+            "limit": raw_limit,
             "addressdetails": 1,
             "countrycodes": "br",
             "viewbox": f"{longitude - 0.5},{latitude + 0.5},{longitude + 0.5},{latitude - 0.5}",
@@ -323,6 +365,10 @@ def _overpass_name_search(latitude, longitude, radius_meters, query, limit=30):
             ])
             vicinity = ", ".join(vicinity_parts) or None
             distance = estimate_distance_km((latitude, longitude), (lat, lon))
+            completeness = compute_metadata_completeness_score({
+                "addr:housenumber": address.get("house_number"),
+                "addr:street": address.get("road"),
+            })
             results.append({
                 "name": name,
                 "rating": None,
@@ -331,22 +377,40 @@ def _overpass_name_search(latitude, longitude, radius_meters, query, limit=30):
                 "latitude": lat,
                 "longitude": lon,
                 "maps_url": f"https://www.google.com/maps/search/?api=1&query={lat},{lon}",
+                "metadata_completeness_score": completeness,
             })
+        for result in results:
+            deterministic_prefilter_score(result, max_radius_km)
+        results.sort(key=lambda r: r["deterministic_score"], reverse=True)
         return results[:limit]
 
     results = []
-    seen = set()
+    seen_keys = set()
     for element in response.get("elements", []):
+        osm_key = (element.get("type"), element.get("id"))
+        if osm_key in seen_keys:
+            continue
         result = _osm_place_to_result(element, latitude, longitude)
-        if result and result["name"] not in seen:
-            seen.add(result["name"])
-            results.append(result)
-    random.shuffle(results)
+        if not result:
+            continue
+        seen_keys.add(osm_key)
+        results.append(result)
+
+    for result in results:
+        deterministic_prefilter_score(result, max_radius_km)
+    results.sort(key=lambda r: r["deterministic_score"], reverse=True)
     return results[:limit]
 
 
-def get_foursquare_suggestions(latitude, longitude, radius_meters, intent=None, category_ids=None, query=None):
-    """Place search via OpenStreetMap Overpass API (gratuito, sem chave)."""
+def get_overpass_suggestions(latitude, longitude, radius_meters, intent=None, category_ids=None, query=None):
+    """Place search via OpenStreetMap Overpass API (gratuito, sem chave).
+
+    Returns a shortlist (up to 20) already deduplicated and sorted by
+    `deterministic_score` (proximity + metadata completeness proxy) — this is
+    the deterministic-filter stage. Callers that want the final semantically
+    ranked top-N should pass this shortlist to
+    `bonding.services.date_ranking.rerank_suggestions_with_llm`.
+    """
     if query:
         return _overpass_name_search(latitude, longitude, radius_meters, query)
 

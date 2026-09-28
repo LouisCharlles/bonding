@@ -22,8 +22,8 @@ import pandas as pd
 from django.conf import settings
 from django.core.management.base import BaseCommand
 
-from bonding.services.conversation_analysis import INTEREST_MAP
-from bonding.services.gemini import _INTENT_PROMPT
+from bonding.services.conversation_analysis import INTEREST_MAP, detect_interests_from_text
+from bonding.services.gemini import _INTENT_PROMPT, _STAGE_PROMPT
 
 RAW_DIR = os.path.join(settings.BASE_DIR, "data", "raw")
 OUT_DIR = os.path.join(settings.BASE_DIR, "data")
@@ -57,6 +57,10 @@ class Command(BaseCommand):
             "--train-ratio", type=float, default=0.80,
             help="Proporção de treino (default: 0.80)",
         )
+        parser.add_argument(
+            "--task", choices=["intent", "stage", "both"], default="intent",
+            help="Qual tarefa exportar: intent (binário legado), stage (estágio+interesses) ou both (default: intent)",
+        )
 
     def handle(self, *args, **options):
         input_path = os.path.join(RAW_DIR, options["input"])
@@ -72,17 +76,28 @@ class Command(BaseCommand):
         df = pd.read_csv(input_path)
         self.stdout.write(f"Linhas carregadas: {len(df)} | Conversas: {df['conversation_id'].nunique()}")
 
-        examples = self._build_examples(df, options["min_turns"])
-        self.stdout.write(f"Exemplos gerados: {len(examples)}")
+        task = options["task"]
 
-        if not examples:
-            self.stderr.write(self.style.ERROR("Nenhum exemplo gerado — verifique o CSV."))
-            return
+        if task in ("intent", "both"):
+            examples = self._build_examples(df, options["min_turns"])
+            self.stdout.write(f"Exemplos de intent gerados: {len(examples)}")
+            if examples:
+                self._write_splits(examples, "gemini", options["train_ratio"], dist_key="intent")
 
+        if task in ("stage", "both"):
+            stage_examples = self._build_stage_examples(df, options["min_turns"])
+            self.stdout.write(f"Exemplos de stage gerados: {len(stage_examples)}")
+            if stage_examples:
+                self._write_splits(stage_examples, "gemini_stage", options["train_ratio"], dist_key="stage")
+
+        self._export_enriched_keywords(df)
+
+    # =========================================================
+
+    def _write_splits(self, examples: list[dict], prefix: str, train_ratio: float, dist_key: str):
         random.seed(SEED)
         random.shuffle(examples)
 
-        train_ratio = options["train_ratio"]
         val_ratio = (1.0 - train_ratio) / 2
         n = len(examples)
         n_train = int(n * train_ratio)
@@ -95,22 +110,20 @@ class Command(BaseCommand):
         }
 
         for split_name, split_examples in splits.items():
-            out_path = os.path.join(OUT_DIR, f"gemini_{split_name}.jsonl")
+            out_path = os.path.join(OUT_DIR, f"{prefix}_{split_name}.jsonl")
             with open(out_path, "w", encoding="utf-8") as fh:
                 for ex in split_examples:
                     fh.write(json.dumps(ex, ensure_ascii=False) + "\n")
-            intent_dist = Counter(
-                json.loads(ex["contents"][1]["parts"][0]["text"])["intent"]
+            label_dist = Counter(
+                json.loads(ex["contents"][1]["parts"][0]["text"])[dist_key]
                 for ex in split_examples
             )
             self.stdout.write(
                 self.style.SUCCESS(f"  {split_name}: {len(split_examples)} exemplos → {out_path}")
-                + f"  {dict(intent_dist)}"
+                + f"  {dict(label_dist)}"
             )
 
-        self._export_enriched_keywords(df)
-
-        self.stdout.write("\nAmostra de treino:")
+        self.stdout.write(f"\nAmostra de treino ({prefix}):")
         for ex in splits["train"][:2]:
             user_text = ex["contents"][0]["parts"][0]["text"]
             model_text = ex["contents"][1]["parts"][0]["text"]
@@ -172,6 +185,49 @@ class Command(BaseCommand):
                 "cuisine_or_amenity": amenity,
                 "time": tempo,
             },
+        }
+
+    def _build_stage_examples(self, df: pd.DataFrame, min_turns: int) -> list[dict]:
+        examples = []
+        for conv_id, group in df.groupby("conversation_id"):
+            group = group.sort_values("turn_index")
+            if len(group) < min_turns:
+                continue
+
+            messages = [
+                {"label": f"User {row['sender']}", "content": str(row["text"])}
+                for _, row in group.iterrows()
+            ]
+            chat_history = "\n".join(f"{m['label']}: {m['content']}" for m in messages)
+            prompt = _STAGE_PROMPT.format(chat_history=chat_history)
+
+            meta = group.iloc[-1]
+            label = self._build_stage_label(meta, chat_history)
+
+            examples.append({
+                "contents": [
+                    {"role": "user", "parts": [{"text": prompt}]},
+                    {"role": "model", "parts": [{"text": json.dumps(label, ensure_ascii=False)}]},
+                ]
+            })
+        return examples
+
+    def _build_stage_label(self, meta, chat_history: str) -> dict:
+        stage = str(meta.get("stage", "quebra_gelo"))
+
+        if stage in ("interesse_mutuo", "pronto_para_role"):
+            stage_confidence = random.randint(80, 97)
+        else:
+            stage_confidence = random.randint(60, 84)
+
+        interests = detect_interests_from_text(chat_history)
+        tipo_date = str(meta.get("tipo_date", "none"))
+
+        return {
+            "stage": stage,
+            "stage_confidence": stage_confidence,
+            "interests": interests,
+            "tipo_role": tipo_date if tipo_date != "none" else None,
         }
 
     def _export_enriched_keywords(self, df: pd.DataFrame):

@@ -22,6 +22,10 @@ from .wallet import RewardEvent, UnlockSession, Wallet, WalletLedger
 from .verification import ProfileVerificationAttempt, VerificationSelfie
 from .location_ping import UserLocationPing
 from .message import MessageReaction
+from .conversation_stage_snapshot import ConversationStageSnapshot
+from .legal import LegalDocumentVersion
+from .consent import ConsentRecord
+from .date_suggestion_feedback import DateSuggestionFeedback
 __all__ = [
     'Profile',
     'User',
@@ -53,4 +57,8 @@ __all__ = [
     'VerificationSelfie',
     'UserLocationPing',
     'MessageReaction',
+    'ConversationStageSnapshot',
+    'LegalDocumentVersion',
+    'ConsentRecord',
+    'DateSuggestionFeedback',
 ]

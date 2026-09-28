@@ -1,3 +1,6 @@
+# Keyword-based fallback/baseline used when Gemini is unavailable (no
+# ConversationStageSnapshot yet, or GEMINI_API_KEY unset) and as the
+# non-Gemini comparison point in evaluate_stage_classifier.
 from ..models import Message
 
 READINESS_THRESHOLD = 15
@@ -56,6 +59,18 @@ CATEGORY_LABELS = {
 }
 
 
+def detect_interests_from_text(text):
+    """Substring-keyword match against INTEREST_MAP. Reused by the legacy
+    heuristic view and by the stage classifier evaluation script as the
+    non-Gemini baseline."""
+    lowered = text.lower()
+    return [
+        interest
+        for interest, data in INTEREST_MAP.items()
+        if any(keyword in lowered for keyword in data["keywords"])
+    ]
+
+
 def analyze_conversation_interests(conversation_id):
     messages = Message.objects.filter(
         conversation_id=conversation_id,
@@ -64,17 +79,12 @@ def analyze_conversation_interests(conversation_id):
     ).values_list("content", flat=True)
 
     message_count = len(messages)
-    full_text = " ".join(messages).lower()
+    full_text = " ".join(messages)
 
-    detected_interests = []
-    foursquare_categories = []
-
-    for interest, data in INTEREST_MAP.items():
-        if any(keyword in full_text for keyword in data["keywords"]):
-            detected_interests.append(interest)
-            foursquare_categories.extend(data["category_ids"])
-
-    foursquare_categories = list(dict.fromkeys(foursquare_categories))
+    detected_interests = detect_interests_from_text(full_text)
+    foursquare_categories = list(dict.fromkeys(
+        cid for interest in detected_interests for cid in INTEREST_MAP[interest]["category_ids"]
+    ))
 
     return {
         "ready": message_count >= READINESS_THRESHOLD,

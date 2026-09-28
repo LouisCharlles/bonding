@@ -22,6 +22,9 @@ from .video_calls import VideoCallSessionViewSet
 from .wallet import WalletViewSet
 from .emails import VerifyEmailView
 from .password_reset import ForgotPasswordView, ResetPasswordView
+from .legal import ConsentCreateView, ConsentMeView, LegalDocumentCurrentView
+from .account import AccountDeactivateView, AccountDeleteView
+from .health import HealthCheckView
 __all__ = [
     'BlockViewSet',
     'SpotifyTrackSearchView',
@@ -57,4 +60,10 @@ __all__ = [
     'VerifyEmailView',
     'ForgotPasswordView',
     'ResetPasswordView',
+    'ConsentCreateView',
+    'ConsentMeView',
+    'LegalDocumentCurrentView',
+    'AccountDeactivateView',
+    'AccountDeleteView',
+    'HealthCheckView',
 ]

@@ -440,6 +440,7 @@ class Command(BaseCommand):
         # --- Montar linhas CSV ---
         has_event = int(use_event)
         rows = []
+        total_turns = len(turns)
         for idx, (sndr, text) in enumerate(turns):
             rows.append({
                 "conversation_id": conversation_id,
@@ -459,6 +460,7 @@ class Command(BaseCommand):
                 "local_usado": local_usado,
                 "amenity": amenity or "",
                 "cidade": "São Luís",
+                "stage": self._infer_stage(intent_type, idx, total_turns),
             })
         return rows
 
@@ -496,6 +498,7 @@ class Command(BaseCommand):
                 sender = "B" if sender == "A" else "A"
 
         rows = []
+        total_turns = len(turns)
         for idx, (sndr, text) in enumerate(turns):
             rows.append({
                 "conversation_id": conversation_id,
@@ -515,6 +518,7 @@ class Command(BaseCommand):
                 "local_usado": "",
                 "amenity": "",
                 "cidade": "São Luís",
+                "stage": self._infer_stage("none", idx, total_turns),
             })
         return rows
 
@@ -554,6 +558,17 @@ class Command(BaseCommand):
         text = " ".join(text.split())
         text = text.replace("??", "?").replace("  ", " ")
         return text.strip()
+
+    @staticmethod
+    def _infer_stage(intent_type: str, turn_index: int, total_turns: int) -> str:
+        """Derives a conversation-stage label deterministically from the
+        existing intent_type ground truth, so no manual re-annotation is
+        needed. Mirrors ConversationStageSnapshot.STAGE_CHOICES."""
+        if intent_type == "none":
+            return "quebra_gelo" if turn_index < total_turns / 2 else "rapport"
+        if intent_type == "implicita":
+            return "interesse_mutuo"
+        return "pronto_para_role"  # explicita
 
     @staticmethod
     def _infer_tipo_date(acao: str) -> str:

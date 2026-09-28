@@ -104,6 +104,7 @@ class MessageViewSet(viewsets.ModelViewSet):
         cache.delete_many([f"inbox:{conversation.user1_id}", f"inbox:{conversation.user2_id}"])
         self._publish_message_created(message)
         self._maybe_trigger_intent_analysis(message)
+        self._maybe_mark_suggestion_used(message)
 
     def _maybe_trigger_intent_analysis(self, message):
         if message.message_type != Message.TYPE_TEXT:
@@ -116,6 +117,21 @@ class MessageViewSet(viewsets.ModelViewSet):
         if count >= 10 and count % 10 == 0:
             from ..tasks import check_date_intent_task
             check_date_intent_task.delay(message.conversation_id)
+
+    def _maybe_mark_suggestion_used(self, message):
+        if message.message_type != Message.TYPE_DATE_SUGGESTION:
+            return
+        payload = message.provider_payload or {}
+        name, lat, lon = payload.get("name"), payload.get("latitude"), payload.get("longitude")
+        if not name or lat is None or lon is None:
+            return
+        from ..services.date_ranking import mark_suggestion_used
+        mark_suggestion_used(
+            conversation_id=message.conversation_id,
+            place_name=name,
+            latitude=lat,
+            longitude=lon,
+        )
 
     @action(detail=False, methods=["post"], url_path="mark-read")
     def mark_read(self, request):

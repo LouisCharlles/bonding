@@ -1,5 +1,6 @@
 from django.contrib.auth import get_user_model
 from django.contrib.auth.password_validation import validate_password
+from django.db import transaction
 from django.db.models import Q
 from rest_framework import serializers
 from rest_framework.validators import UniqueValidator
@@ -8,8 +9,11 @@ from rest_framework_simplejwt.serializers import TokenObtainPairSerializer
 from .models import (
     Block,
     Connection,
+    ConsentRecord,
     Conversation,
+    DateSuggestionFeedback,
     Interest,
+    LegalDocumentVersion,
     Location,
     Match,
     Message,
@@ -33,6 +37,8 @@ from .models import (
     Wallet,
     WalletLedger,
 )
+from .services.account import reactivate_account
+from .services.consent import record_consent
 from .services.presence import is_profile_online, touch_user_presence
 
 User = get_user_model()
@@ -76,10 +82,27 @@ class CustomTokenObtainPairSerializer(TokenObtainPairSerializer):
 
     def validate(self, attrs):
         attrs["email"] = attrs.get("email", "").lower().strip()
+        self._maybe_reactivate_deactivated_account(attrs["email"], attrs.get("password", ""))
         data = super().validate(attrs)
         touch_user_presence(self.user, active=True)
         data["user"] = UserSummarySerializer(self.user).data
         return data
+
+    def _maybe_reactivate_deactivated_account(self, email, password):
+        # Django's authenticate()/ModelBackend rejeita usuarios com
+        # is_active=False antes mesmo de expor o objeto User, entao a
+        # reativacao precisa acontecer aqui, ANTES de super().validate()
+        # chamar authenticate() — assim, quando ele rodar, a conta ja
+        # estara ativa novamente e o login segue o fluxo normal.
+        if not email or not password:
+            return
+        try:
+            user = User.objects.get(email=email, is_active=False)
+        except User.DoesNotExist:
+            return
+        if not user.check_password(password):
+            return
+        reactivate_account(user, request=self.context.get("request"))
 
 
 class UserSummarySerializer(serializers.ModelSerializer):
@@ -412,6 +435,36 @@ class DiscoverProfileSerializer(ProfileSerializer):
         return None
 
 
+class LegalDocumentVersionSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = LegalDocumentVersion
+        fields = [
+            "id",
+            "document_type",
+            "version_label",
+            "content",
+            "content_hash",
+            "effective_date",
+            "published_at",
+        ]
+        read_only_fields = fields
+
+
+class ConsentRecordSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = ConsentRecord
+        fields = [
+            "id",
+            "consent_type",
+            "action",
+            "granted_at",
+            "document_version",
+            "content_hash",
+            "hmac_signature",
+        ]
+        read_only_fields = fields
+
+
 class RegisterSerializer(serializers.ModelSerializer):
     email = serializers.EmailField(
         required=True,
@@ -425,10 +478,17 @@ class RegisterSerializer(serializers.ModelSerializer):
     confirm_password = serializers.CharField(write_only=True, required=True)
     name = serializers.CharField(write_only=True, required=True)
     age = serializers.IntegerField(write_only=True, required=True, min_value=18)
+    accepted_document_ids = serializers.ListField(
+        child=serializers.IntegerField(),
+        write_only=True,
+        required=True,
+        allow_empty=False,
+        help_text="IDs das versoes vigentes de Termos de Uso e Politica de Privacidade aceitas.",
+    )
 
     class Meta:
         model = User
-        fields = ["id", "email", "password", "confirm_password", "name", "age"]
+        fields = ["id", "email", "password", "confirm_password", "name", "age", "accepted_document_ids"]
         read_only_fields = ["id"]
 
     def validate(self, attrs):
@@ -436,25 +496,58 @@ class RegisterSerializer(serializers.ModelSerializer):
             raise serializers.ValidationError(
                 {"confirm_password": "As senhas nao correspondem."}
             )
+
+        current_versions = list(LegalDocumentVersion.objects.filter(is_current=True))
+        if not current_versions:
+            raise serializers.ValidationError(
+                {"accepted_document_ids": "Nenhum documento legal vigente configurado. Contate o suporte."}
+            )
+
+        current_ids = {doc.id for doc in current_versions}
+        accepted_ids = set(attrs.get("accepted_document_ids") or [])
+        if current_ids - accepted_ids:
+            raise serializers.ValidationError(
+                {"accepted_document_ids": "E necessario aceitar os Termos de Uso e a Politica de Privacidade vigentes."}
+            )
+
+        attrs["_document_versions"] = current_versions
         return attrs
 
     def create(self, validated_data):
         name = validated_data.pop("name")
         age = validated_data.pop("age")
         validated_data.pop("confirm_password")
+        document_versions = validated_data.pop("_document_versions")
+        validated_data.pop("accepted_document_ids", None)
 
-        user = User.objects.create_user(
-            email=validated_data["email"],
-            password=validated_data["password"],
-        )
-        Profile.objects.create(
-            user=user,
-            name=name,
-            age=age,
-            gender=Profile.GENDER_OTHER,
-            sexual_orientation=Profile.ORIENTATION_OTHER,
-            course="",
-        )
+        request = self.context.get("request")
+
+        with transaction.atomic():
+            user = User.objects.create_user(
+                email=validated_data["email"],
+                password=validated_data["password"],
+            )
+            Profile.objects.create(
+                user=user,
+                name=name,
+                age=age,
+                gender=Profile.GENDER_OTHER,
+                sexual_orientation=Profile.ORIENTATION_OTHER,
+                course="",
+            )
+            document_type_to_consent_type = {
+                LegalDocumentVersion.TERMS_OF_USE: ConsentRecord.GENERAL_TERMS,
+                LegalDocumentVersion.PRIVACY_POLICY: ConsentRecord.PRIVACY_POLICY,
+                LegalDocumentVersion.RESEARCH_CONSENT: ConsentRecord.RESEARCH_CONSENT,
+            }
+            for document_version in document_versions:
+                consent_type = document_type_to_consent_type[document_version.document_type]
+                record_consent(
+                    user=user,
+                    consent_type=consent_type,
+                    request=request,
+                    document_version=document_version,
+                )
         return user
 
 
@@ -670,6 +763,18 @@ class WalletLedgerSerializer(serializers.ModelSerializer):
     class Meta:
         model = WalletLedger
         fields = ["id", "entry_type", "ribbons_delta", "hearts_delta", "rewinds_delta", "description", "metadata", "created_at"]
+        read_only_fields = fields
+
+
+class DateSuggestionFeedbackSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = DateSuggestionFeedback
+        fields = [
+            "id", "conversation", "match", "event_type", "place_name",
+            "place_latitude", "place_longitude", "deterministic_score",
+            "llm_score", "llm_rank", "metadata_completeness_score",
+            "source", "round_id", "used_at", "metadata", "created_at",
+        ]
         read_only_fields = fields
 
 
