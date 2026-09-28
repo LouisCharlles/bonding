@@ -1,0 +1,142 @@
+# Blueprint de deploy no Render para o piloto academico (TCC) do Bonding.
+#
+# Sobe 3 recursos:
+#   - bonding-web:    servico web (Daphne/ASGI, suporta WebSocket)
+#   - bonding-worker: worker Celery (necessario para a analise de conversa
+#                     por IA via Google Gemini, bonding/tasks.py)
+#   - bonding-redis:  Redis gerenciado, usado como broker do Celery e como
+#                     camada de canais (Channels) do Daphne
+#
+# O banco de dados (Postgres) e o storage de midia continuam no Supabase ja
+# configurado (DATABASE_URL / SUPABASE_*) — nao criamos um Postgres no Render
+# para nao duplicar/migrar dados que ja existem.
+#
+# Depois de criar o Blueprint no Render (New > Blueprint, apontando para este
+# repositorio), preencha manualmente no dashboard os valores marcados como
+# "sync: false" abaixo (sao secrets, nao ficam neste arquivo).
+
+envVarGroups:
+  - name: bonding-shared-secrets
+    envVars:
+      - key: SECRET_KEY
+        sync: false
+      - key: ALLOWED_HOSTS
+        sync: false # ex.: bonding-web.onrender.com
+      - key: ALLOWED_HOSTS_EXTRA
+        sync: false
+      - key: CORS_ALLOWED_ORIGINS
+        sync: false # URL publica do frontend (Vercel, ex.: https://bonding.vercel.app)
+      - key: CSRF_TRUSTED_ORIGINS
+        sync: false
+      - key: FRONTEND_URL
+        sync: false
+      - key: DATABASE_URL
+        sync: false # Supabase Postgres (ja usado em desenvolvimento)
+      - key: FIELD_ENCRYPTION_KEY
+        sync: false
+      - key: SUPABASE_URL
+        sync: false
+      - key: SUPABASE_SERVICE_ROLE_KEY
+        sync: false
+      - key: SUPABASE_STORAGE_BUCKET
+        sync: false
+      - key: AWS_REKOGNITION_ENABLED
+        sync: false
+      - key: VERIFICATION_PROVIDER
+        sync: false
+      - key: AWS_ACCESS_KEY_ID
+        sync: false
+      - key: AWS_SECRET_ACCESS_KEY
+        sync: false
+      - key: AWS_DEFAULT_REGION
+        sync: false
+      - key: GOOGLE_MAPS_API_KEY
+        sync: false
+      - key: GEMINI_API_KEY
+        sync: false
+      - key: SPOTIFY_CLIENT_ID
+        sync: false
+      - key: SPOTIFY_CLIENT_SECRET
+        sync: false
+      - key: ABACATEPAY_API_KEY
+        sync: false # nao usado em modo demo, mas mantenha preenchido se quiser voltar ao fluxo real
+      - key: ABACATEPAY_WEBHOOK_TOKEN
+        sync: false
+      - key: EMAIL_BACKEND
+        sync: false
+      - key: EMAIL_HOST
+        sync: false
+      - key: EMAIL_PORT
+        sync: false
+      - key: EMAIL_HOST_USER
+        sync: false
+      - key: EMAIL_HOST_PASSWORD
+        sync: false
+      - key: EMAIL_USE_TLS
+        sync: false
+      - key: DEFAULT_FROM_EMAIL
+        sync: false
+
+services:
+  - type: redis
+    name: bonding-redis
+    plan: starter
+    ipAllowList: [] # so acessivel pelos outros servicos deste blueprint
+
+  - type: web
+    name: bonding-web
+    runtime: docker
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
+    plan: starter
+    healthCheckPath: /health/
+    envVarGroups:
+      - bonding-shared-secrets
+    envVars:
+      - key: DEBUG
+        value: "false"
+      - key: SECURITY_HARDENING
+        value: "true"
+      - key: PAYMENTS_DEMO_MODE
+        value: "true" # piloto academico: planos premium sao ativados sem cobranca real
+      - key: REDIS_URL
+        fromService:
+          type: redis
+          name: bonding-redis
+          property: connectionString
+      - key: REDIS_CELERY_URL
+        fromService:
+          type: redis
+          name: bonding-redis
+          property: connectionString
+    dockerCommand: >
+      sh -c "python manage.py migrate --noinput &&
+      python manage.py collectstatic --noinput &&
+      daphne -b 0.0.0.0 -p $PORT setup.asgi:application"
+
+  - type: worker
+    name: bonding-worker
+    runtime: docker
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
+    plan: starter
+    envVarGroups:
+      - bonding-shared-secrets
+    envVars:
+      - key: DEBUG
+        value: "false"
+      - key: SECURITY_HARDENING
+        value: "true"
+      - key: PAYMENTS_DEMO_MODE
+        value: "true"
+      - key: REDIS_URL
+        fromService:
+          type: redis
+          name: bonding-redis
+          property: connectionString
+      - key: REDIS_CELERY_URL
+        fromService:
+          type: redis
+          name: bonding-redis
+          property: connectionString
+    dockerCommand: celery -A setup worker --loglevel=info --concurrency=2
