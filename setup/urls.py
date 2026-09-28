@@ -19,7 +19,7 @@ from django.urls import path,include
 from django.conf.urls.static import static
 from django.conf import settings
 from rest_framework.routers import DefaultRouter
-from bonding.views.webhooks import GoogleRewardWebhookView
+# from bonding.views.webhooks import GoogleRewardWebhookView
 from bonding.views import (
     BlockViewSet,
     ConnectionViewSet,
@@ -89,7 +89,7 @@ urlpatterns = [
     path('integrations/spotify/search/', SpotifyTrackSearchView.as_view(), name='spotify-track-search'),
     path('payments/intents/', AbacatePayIntentView.as_view(), name='abacatepay-intent'),
     path('payments/webhooks/abacatepay/', AbacatePayWebhookView.as_view(), name='abacatepay-webhook'),
-    path('webhooks/google-reward/', GoogleRewardWebhookView.as_view(), name='google-reward-ssv'),
+    # path('webhooks/google-reward/', GoogleRewardWebhookView.as_view(), name='google-reward-ssv'),
     path('matches/<int:match_id>/date-suggestions/', MatchDateSuggestionsView.as_view(), name='match-date-suggestions'),
     path('conversations/<int:conversation_id>/date-readiness/', ConversationDateReadinessView.as_view(), name='conversation-date-readiness'),
     path('cupido/recommendations/', CupidoRecommendationsView.as_view(), name='cupido-recommendations'),
