@@ -84,9 +84,7 @@ prompt-toolkit==3.0.52
 propcache==0.4.1
 proto-plus==1.27.2
 protobuf==5.29.6
-psycopg==3.3.3
 psycopg-binary==3.3.3
-psycopg2==2.9.11
 psycopg2-binary==2.9.11
 py-ubjson==0.16.1
 pyarrow==24.0.0

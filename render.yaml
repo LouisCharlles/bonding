@@ -1,11 +1,16 @@
 # Blueprint de deploy no Render para o piloto academico (TCC) do Bonding.
 #
-# Sobe 3 recursos:
+# Sobe 3 recursos, usando o runtime nativo Python do Render (sem Docker) —
+# assim a tela de deploy mostra o output do build/start ao vivo, incluindo
+# tracebacks, sem precisar da aba "Shell" (paga):
 #   - bonding-web:    servico web (Daphne/ASGI, suporta WebSocket)
 #   - bonding-worker: worker Celery (necessario para a analise de conversa
 #                     por IA via Google Gemini, bonding/tasks.py)
 #   - bonding-redis:  Redis gerenciado, usado como broker do Celery e como
 #                     camada de canais (Channels) do Daphne
+#
+# O Dockerfile/docker-compose.yml continuam no repo para rodar localmente,
+# mas nao sao mais usados pelo Render.
 #
 # O banco de dados (Postgres) e o storage de midia continuam no Supabase ja
 # configurado (DATABASE_URL / SUPABASE_*) — nao criamos um Postgres no Render
@@ -85,14 +90,15 @@ services:
 
   - type: web
     name: bonding-web
-    runtime: docker
-    dockerfilePath: ./Dockerfile
-    dockerContext: .
+    runtime: python
     plan: starter
     healthCheckPath: /health/
+    buildCommand: pip install --no-cache-dir -r requirements.txt
     envVarGroups:
       - bonding-shared-secrets
     envVars:
+      - key: PYTHON_VERSION
+        value: "3.12.3"
       - key: DEBUG
         value: "false"
       - key: SECURITY_HARDENING
@@ -109,20 +115,21 @@ services:
           type: redis
           name: bonding-redis
           property: connectionString
-    dockerCommand: >
+    startCommand: >
       sh -c "python manage.py migrate --noinput &&
       python manage.py collectstatic --noinput &&
       daphne -b 0.0.0.0 -p $PORT setup.asgi:application"
 
   - type: worker
     name: bonding-worker
-    runtime: docker
-    dockerfilePath: ./Dockerfile
-    dockerContext: .
+    runtime: python
     plan: starter
+    buildCommand: pip install --no-cache-dir -r requirements.txt
     envVarGroups:
       - bonding-shared-secrets
     envVars:
+      - key: PYTHON_VERSION
+        value: "3.12.3"
       - key: DEBUG
         value: "false"
       - key: SECURITY_HARDENING
@@ -139,4 +146,4 @@ services:
           type: redis
           name: bonding-redis
           property: connectionString
-    dockerCommand: celery -A setup worker --loglevel=info --concurrency=2
+    startCommand: celery -A setup worker --loglevel=info --concurrency=2
