@@ -249,6 +249,11 @@ FRONTEND_URL = config('FRONTEND_URL', default='http://localhost:8080')
 BACKEND_URL = config('BACKEND_URL', default='http://127.0.0.1:8000')
 ABACATEPAY_API_KEY = config('ABACATEPAY_API_KEY', default='')
 ABACATEPAY_WEBHOOK_TOKEN = config('ABACATEPAY_WEBHOOK_TOKEN', default='')
+
+# Modo demonstracao academica: ativa planos premium imediatamente, sem
+# nenhuma chamada real ao AbacatePay e sem cobranca financeira. Usado no
+# piloto de TCC com participantes reais (ver bonding/services/subscriptions.py).
+PAYMENTS_DEMO_MODE = env_bool('PAYMENTS_DEMO_MODE', default=False)
 GOOGLE_MAPS_API_KEY = config('GOOGLE_MAPS_API_KEY', default='')
 AWS_REKOGNITION_ENABLED = env_bool('AWS_REKOGNITION_ENABLED', default=False)
 VERIFICATION_PROVIDER = config('VERIFICATION_PROVIDER', default='aws_rekognition')

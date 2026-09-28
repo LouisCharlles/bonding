@@ -1,5 +1,6 @@
 import json
 
+from django.conf import settings
 from rest_framework import permissions, status
 from rest_framework.response import Response
 from rest_framework.views import APIView
@@ -11,6 +12,7 @@ from ..services.external_integrations import (
     create_abacatepay_pix,
     verify_abacatepay_webhook,
 )
+from ..services.subscriptions import activate_demo_subscription
 
 
 class AbacatePayIntentView(APIView):
@@ -21,6 +23,19 @@ class AbacatePayIntentView(APIView):
         plan = PremiumPlan.objects.filter(id=plan_id, is_active=True).first()
         if not plan:
             return Response({"detail": "Plano invalido."}, status=404)
+
+        if getattr(settings, "PAYMENTS_DEMO_MODE", False):
+            activate_demo_subscription(request.user, plan)
+            return Response(
+                {
+                    "demo": True,
+                    "detail": (
+                        "Plano ativado em modo demonstracao (piloto academico) "
+                        "— nenhuma cobranca real foi realizada."
+                    ),
+                },
+                status=201,
+            )
 
         amount = int(plan.price_monthly * 100)
         method = request.data.get("method", "card")
