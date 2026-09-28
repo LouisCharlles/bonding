@@ -291,29 +291,49 @@ SECURE_CONTENT_TYPE_NOSNIFF = True
 SECURE_REFERRER_POLICY = config("SECURE_REFERRER_POLICY", default="same-origin")
 X_FRAME_OPTIONS = config("X_FRAME_OPTIONS", default="DENY")
 
-CACHES = {
-    "default": {
-        "BACKEND": "django.core.cache.backends.redis.RedisCache",
-        "LOCATION": REDIS_URL,
-        "KEY_PREFIX": "bonding",
-        "TIMEOUT": 300,
+# Piloto academico no free tier do Render: nao ha Redis/worker gerenciado
+# gratuito la, entao USE_REDIS=false troca cache e canais (Channels) para
+# backends em memoria do proprio processo (ok para uma unica instancia web,
+# WEB_CONCURRENCY=1) e faz as tasks do Celery (bonding/tasks.py) rodarem
+# sincronas/inline, sem broker nem worker separado.
+USE_REDIS = env_bool("USE_REDIS", default=True)
+
+if USE_REDIS:
+    CACHES = {
+        "default": {
+            "BACKEND": "django.core.cache.backends.redis.RedisCache",
+            "LOCATION": REDIS_URL,
+            "KEY_PREFIX": "bonding",
+            "TIMEOUT": 300,
+        }
     }
-}
+    CHANNEL_LAYERS = {
+        "default": {
+            "BACKEND": "channels_redis.core.RedisChannelLayer",
+            "CONFIG": {
+                "hosts": [REDIS_URL],
+            },
+        },
+    }
+else:
+    CACHES = {
+        "default": {
+            "BACKEND": "django.core.cache.backends.locmem.LocMemCache",
+        }
+    }
+    CHANNEL_LAYERS = {
+        "default": {
+            "BACKEND": "channels.layers.InMemoryChannelLayer",
+        },
+    }
 
 CELERY_BROKER_URL = REDIS_CELERY_URL
 CELERY_RESULT_BACKEND = REDIS_CELERY_URL
 CELERY_TASK_SERIALIZER = 'json'
 CELERY_ACCEPT_CONTENT = ['json']
 CELERY_TASK_IGNORE_RESULT = True
-
-CHANNEL_LAYERS = {
-    "default": {
-        "BACKEND": "channels_redis.core.RedisChannelLayer",
-        "CONFIG": {
-            "hosts": [REDIS_URL],
-        },
-    },
-}
+CELERY_TASK_ALWAYS_EAGER = not USE_REDIS
+CELERY_TASK_EAGER_PROPAGATES = not USE_REDIS
 
 # Default primary key field type
 # https://docs.djangoproject.com/en/5.2/ref/settings/#default-auto-field

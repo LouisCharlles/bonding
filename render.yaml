@@ -1,16 +1,17 @@
-# Blueprint de deploy no Render para o piloto academico (TCC) do Bonding.
+# Blueprint de deploy no Render (free tier) para o piloto academico (TCC) do
+# Bonding — um unico recurso, usando o runtime nativo Python do Render (sem
+# Docker), para a tela de deploy mostrar o output do build/start ao vivo,
+# incluindo tracebacks, sem precisar da aba "Shell" (paga):
+#   - bonding-web: servico web (Daphne/ASGI, suporta WebSocket), plano free.
 #
-# Sobe 3 recursos, usando o runtime nativo Python do Render (sem Docker) —
-# assim a tela de deploy mostra o output do build/start ao vivo, incluindo
-# tracebacks, sem precisar da aba "Shell" (paga):
-#   - bonding-web:    servico web (Daphne/ASGI, suporta WebSocket)
-#   - bonding-worker: worker Celery (necessario para a analise de conversa
-#                     por IA via Google Gemini, bonding/tasks.py)
-#   - bonding-redis:  Redis gerenciado, usado como broker do Celery e como
-#                     camada de canais (Channels) do Daphne
+# Nao ha worker Celery nem Redis gerenciado (o free tier do Render nao tem
+# essas opcoes gratuitas): USE_REDIS=false faz o cache e a camada de canais
+# (Channels) rodarem em memoria do proprio processo, e as tasks do Celery
+# (bonding/tasks.py, analise de conversa via Gemini) rodam sincronas/inline
+# em vez de em background. Ver setup/settings.py (bloco "USE_REDIS").
 #
-# O Dockerfile/docker-compose.yml continuam no repo para rodar localmente,
-# mas nao sao mais usados pelo Render.
+# O Dockerfile/docker-compose.yml continuam no repo para rodar localmente
+# com Redis de verdade, mas nao sao mais usados pelo Render.
 #
 # O banco de dados (Postgres) e o storage de midia continuam no Supabase ja
 # configurado (DATABASE_URL / SUPABASE_*) — nao criamos um Postgres no Render
@@ -83,15 +84,10 @@ envVarGroups:
         sync: false
 
 services:
-  - type: redis
-    name: bonding-redis
-    plan: starter
-    ipAllowList: [] # so acessivel pelos outros servicos deste blueprint
-
   - type: web
     name: bonding-web
     runtime: python
-    plan: starter
+    plan: free
     healthCheckPath: /health/
     buildCommand: pip install --no-cache-dir -r requirements.txt
     envVars:
@@ -104,44 +100,9 @@ services:
         value: "true"
       - key: PAYMENTS_DEMO_MODE
         value: "true" # piloto academico: planos premium sao ativados sem cobranca real
-      - key: REDIS_URL
-        fromService:
-          type: redis
-          name: bonding-redis
-          property: connectionString
-      - key: REDIS_CELERY_URL
-        fromService:
-          type: redis
-          name: bonding-redis
-          property: connectionString
+      - key: USE_REDIS
+        value: "false" # free tier nao tem Redis/worker gerenciado gratuito
     startCommand: >
       sh -c "python manage.py migrate --noinput &&
       python manage.py collectstatic --noinput &&
       daphne -b 0.0.0.0 -p $PORT setup.asgi:application"
-
-  - type: worker
-    name: bonding-worker
-    runtime: python
-    plan: starter
-    buildCommand: pip install --no-cache-dir -r requirements.txt
-    envVars:
-      - fromGroup: bonding-shared-secrets
-      - key: PYTHON_VERSION
-        value: "3.12.3"
-      - key: DEBUG
-        value: "false"
-      - key: SECURITY_HARDENING
-        value: "true"
-      - key: PAYMENTS_DEMO_MODE
-        value: "true"
-      - key: REDIS_URL
-        fromService:
-          type: redis
-          name: bonding-redis
-          property: connectionString
-      - key: REDIS_CELERY_URL
-        fromService:
-          type: redis
-          name: bonding-redis
-          property: connectionString
-    startCommand: celery -A setup worker --loglevel=info --concurrency=2
