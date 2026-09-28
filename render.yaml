@@ -94,9 +94,8 @@ services:
     plan: starter
     healthCheckPath: /health/
     buildCommand: pip install --no-cache-dir -r requirements.txt
-    envVarGroups:
-      - bonding-shared-secrets
     envVars:
+      - fromGroup: bonding-shared-secrets
       - key: PYTHON_VERSION
         value: "3.12.3"
       - key: DEBUG
@@ -125,9 +124,8 @@ services:
     runtime: python
     plan: starter
     buildCommand: pip install --no-cache-dir -r requirements.txt
-    envVarGroups:
-      - bonding-shared-secrets
     envVars:
+      - fromGroup: bonding-shared-secrets
       - key: PYTHON_VERSION
         value: "3.12.3"
       - key: DEBUG
