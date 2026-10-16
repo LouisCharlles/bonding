@@ -77,6 +77,8 @@ def delete_account(user, request=None):
         user.is_active = False
         user.set_unusable_password()
         user.email = f"deleted-user-{user.id}-{uuid.uuid4().hex[:8]}@deleted.bonding.local"
-        user.save(update_fields=["is_active", "password", "email"])
+        # User.save() espelha o email em username (tambem unico) — precisa
+        # entrar no update_fields para liberar o email original de verdade.
+        user.save(update_fields=["is_active", "password", "email", "username"])
 
     return user
