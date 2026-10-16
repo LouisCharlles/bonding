@@ -8,6 +8,12 @@ from ..auth_cookies import clear_auth_cookies, set_access_cookie, set_refresh_co
 from ..serializers import CustomTokenObtainPairSerializer
 
 
+def _parse_bool(value) -> bool:
+    if isinstance(value, bool):
+        return value
+    return str(value).strip().lower() in {"1", "true", "yes", "on"}
+
+
 class CookieBackedTokenRefreshSerializer(TokenRefreshSerializer):
     refresh = serializers.CharField(required=False)
 
@@ -40,8 +46,9 @@ class CustomTokenObtainPairView(APIView):
             },
             status=status.HTTP_200_OK,
         )
-        set_access_cookie(response, access_token)
-        set_refresh_cookie(response, refresh_token)
+        cross_site = _parse_bool(request.data.get("third_party_cookies"))
+        set_access_cookie(response, access_token, cross_site=cross_site)
+        set_refresh_cookie(response, refresh_token, cross_site=cross_site)
         return response
 
 
