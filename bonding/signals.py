@@ -1,7 +1,20 @@
+import logging
+
 from django.core.cache import cache
 from django.db.models.signals import post_delete, post_save
 from django.dispatch import receiver
 from .models import Connection, Match, Message, Notification, Photo, Profile, User, Wallet
+
+logger = logging.getLogger(__name__)
+
+
+def _invalidate_profile_me_cache(user_id):
+    # Cache fora do ar (ex.: Redis indisponivel) nao pode derrubar a escrita
+    # que disparou o signal — no pior caso a resposta antiga expira em 5 min.
+    try:
+        cache.delete(f"profile_me:{user_id}")
+    except Exception:
+        logger.warning("Nao foi possivel invalidar o cache profile_me:%s", user_id, exc_info=True)
 
 
 @receiver(post_save, sender=Profile)
@@ -9,14 +22,14 @@ def invalidate_profile_me_cache(sender, instance, **kwargs):
     # /profiles/me/ fica 5 min em cache; qualquer escrita no Profile (ex.:
     # aprovacao da verificacao facial) precisa derrubar a resposta antiga,
     # senao o frontend segue vendo is_verified=false e volta para /app/verify.
-    cache.delete(f"profile_me:{instance.user_id}")
+    _invalidate_profile_me_cache(instance.user_id)
 
 
 @receiver([post_save, post_delete], sender=Photo)
 def invalidate_profile_me_cache_on_photo_change(sender, instance, **kwargs):
     user_id = Profile.objects.filter(pk=instance.profile_id).values_list("user_id", flat=True).first()
     if user_id is not None:
-        cache.delete(f"profile_me:{user_id}")
+        _invalidate_profile_me_cache(user_id)
 
 
 @receiver(post_save, sender=Connection)

@@ -1,9 +1,12 @@
+import logging
 import uuid
 
 from django.db import transaction
 
-from ..models import ConsentRecord, Photo, Profile
+from ..models import ConsentRecord, Photo, Profile, VerificationSelfie
 from .consent import record_consent
+
+logger = logging.getLogger(__name__)
 
 
 def deactivate_account(user, request=None):
@@ -42,15 +45,27 @@ def delete_account(user, request=None):
 
         profile = getattr(user, "profile", None)
         if profile is not None:
-            for photo in Photo.objects.filter(profile=profile):
-                photo.image.delete(save=False)
+            # Os arquivos so saem do storage depois do commit: se algo falhar
+            # no meio, o rollback desfaz o banco, mas um arquivo ja apagado nao
+            # volta — antes isso deixava o perfil apontando para fotos sumidas.
+            media_files = [photo.image for photo in Photo.objects.filter(profile=profile)]
+            media_files += [
+                selfie.image
+                for selfie in VerificationSelfie.objects.filter(attempt__profile=profile)
+            ]
             Photo.objects.filter(profile=profile).delete()
+            # only("id"): nao carrega provider_payload (campo criptografado),
+            # que nao precisa ser lido para apagar a tentativa.
+            profile.verification_attempts.only("id").delete()
 
-            for attempt in profile.verification_attempts.all():
-                selfie = getattr(attempt, "selfie", None)
-                if selfie is not None:
-                    selfie.image.delete(save=False)
-            profile.verification_attempts.all().delete()
+            def delete_media_files():
+                for field_file in media_files:
+                    try:
+                        field_file.storage.delete(field_file.name)
+                    except Exception:
+                        logger.warning("Falha ao apagar %s do storage", field_file.name, exc_info=True)
+
+            transaction.on_commit(delete_media_files)
 
             profile.name = "Usuario removido"
             profile.bio = ""
