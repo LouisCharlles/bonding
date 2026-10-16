@@ -1,6 +1,22 @@
-from django.db.models.signals import post_save
+from django.core.cache import cache
+from django.db.models.signals import post_delete, post_save
 from django.dispatch import receiver
-from .models import Connection, Match, Message, Notification, User, Wallet
+from .models import Connection, Match, Message, Notification, Photo, Profile, User, Wallet
+
+
+@receiver(post_save, sender=Profile)
+def invalidate_profile_me_cache(sender, instance, **kwargs):
+    # /profiles/me/ fica 5 min em cache; qualquer escrita no Profile (ex.:
+    # aprovacao da verificacao facial) precisa derrubar a resposta antiga,
+    # senao o frontend segue vendo is_verified=false e volta para /app/verify.
+    cache.delete(f"profile_me:{instance.user_id}")
+
+
+@receiver([post_save, post_delete], sender=Photo)
+def invalidate_profile_me_cache_on_photo_change(sender, instance, **kwargs):
+    user_id = Profile.objects.filter(pk=instance.profile_id).values_list("user_id", flat=True).first()
+    if user_id is not None:
+        cache.delete(f"profile_me:{user_id}")
 
 
 @receiver(post_save, sender=Connection)
