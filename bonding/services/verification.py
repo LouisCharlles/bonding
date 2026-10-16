@@ -10,6 +10,9 @@ from .external_integrations import IntegrationError
 SIMILARITY_APPROVAL_THRESHOLD = 90
 SELFIE_MIN_BRIGHTNESS = 35
 SELFIE_MIN_SHARPNESS = 40
+# Basta UMA foto do perfil bater com a selfie: as demais podem ser de
+# paisagem, pet, grupo etc. Limite para conter o custo de CompareFaces.
+MAX_PHOTOS_TO_COMPARE = 6
 
 
 @dataclass
@@ -46,7 +49,7 @@ def compare_profile_selfie(profile, selfie) -> VerificationResult:
     except ImportError as error:
         raise IntegrationError("boto3 nao instalado no backend para usar AWS Rekognition.") from error
 
-    profile_photos = list(profile.photos.all()[:2])
+    profile_photos = list(profile.photos.all()[:MAX_PHOTOS_TO_COMPARE])
     if len(profile_photos) < 2:
         raise IntegrationError("O perfil precisa de pelo menos duas fotos para verificacao.")
 
@@ -115,8 +118,12 @@ def compare_profile_selfie(profile, selfie) -> VerificationResult:
 
     comparisons = []
     best_similarity = 0.0
+    last_error = None
 
     for photo in profile_photos:
+        # Uma foto sem rosto (ou pequena demais) faz o CompareFaces lancar
+        # InvalidParameterException — registra e segue para a proxima, em
+        # vez de descartar a comparacao das outras fotos.
         try:
             target_bytes = _read_field_bytes(photo.image)
             comparison = rekognition.compare_faces(
@@ -126,7 +133,9 @@ def compare_profile_selfie(profile, selfie) -> VerificationResult:
                 QualityFilter="AUTO",
             )
         except Exception as error:
-            raise IntegrationError(f"Falha ao comparar a selfie com as fotos do perfil: {error}") from error
+            last_error = error
+            comparisons.append({"photo_id": photo.id, "best_similarity": 0.0, "error": str(error)})
+            continue
 
         similarities = [float(match.get("Similarity") or 0) for match in comparison.get("FaceMatches", [])]
         photo_best = max(similarities, default=0.0)
@@ -136,6 +145,13 @@ def compare_profile_selfie(profile, selfie) -> VerificationResult:
             "best_similarity": photo_best,
             "raw": comparison,
         })
+        if best_similarity >= SIMILARITY_APPROVAL_THRESHOLD:
+            break
+
+    if all("error" in comparison for comparison in comparisons):
+        raise IntegrationError(
+            f"Falha ao comparar a selfie com as fotos do perfil: {last_error}"
+        ) from last_error
 
     provider_payload = {
         "face_detection": face_detection,
