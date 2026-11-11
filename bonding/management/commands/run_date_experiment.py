@@ -9,6 +9,7 @@ Overpass API (1 call per conversation, shared across the 3 grounded
 variants) — intentional, this measures real LLM behaviour, nothing here is
 mocked.
 """
+import time
 from uuid import uuid4
 
 from django.core.management.base import BaseCommand, CommandError
@@ -44,6 +45,10 @@ class Command(BaseCommand):
             "--limit", type=int, default=None,
             help="Processa apenas as N primeiras conversas sinteticas (util para caber na cota diaria do Gemini).",
         )
+        parser.add_argument(
+            "--pause", type=float, default=2.0,
+            help="Segundos de espera entre conversas, para nao sobrecarregar a Overpass API publica.",
+        )
 
     def handle(self, *args, **options):
         if not settings.GEMINI_API_KEY:
@@ -76,8 +81,14 @@ class Command(BaseCommand):
         experiment_run_id = str(uuid4())
         self.stdout.write(f"experiment_run_id={experiment_run_id}")
 
-        for conversation in conversations:
+        for i, conversation in enumerate(conversations):
             self._run_conversation(conversation, experiment_run_id)
+            if i < len(conversations) - 1:
+                # Pausa entre conversas — boa pratica com as instancias publicas
+                # e compartilhadas da Overpass API (Secao 3.2): evita rajadas de
+                # requisicoes que aumentam a chance de 406/429/502/503/504 ou de
+                # acionar bloqueio temporario por IP em uso automatizado pesado.
+                time.sleep(options["pause"])
 
         self.stdout.write(self.style.SUCCESS(
             f"Experimento concluido. experiment_run_id={experiment_run_id}"
