@@ -1,20 +1,23 @@
 import json
 import base64
+import logging
 from math import radians, sin, cos, sqrt, atan2
-from urllib.error import HTTPError
+from urllib.error import HTTPError, URLError
 from urllib.parse import urlencode
 from urllib.request import Request, urlopen
 
 from django.conf import settings
+
+logger = logging.getLogger(__name__)
 
 
 class IntegrationError(RuntimeError):
     pass
 
 
-def _http_json(method, url, headers=None, data=None):
+def _http_json(method, url, headers=None, data=None, timeout=20):
     req_headers = headers or {}
-    
+
     # Adicionando um User-Agent para evitar que o Cloudflare/WAF bloqueie a chamada
     if "User-Agent" not in req_headers:
         req_headers["User-Agent"] = "BondingApp/1.0 (Development)"
@@ -26,7 +29,7 @@ def _http_json(method, url, headers=None, data=None):
         data=data,
     )
     try:
-        with urlopen(request) as response:
+        with urlopen(request, timeout=timeout) as response:
             payload = response.read().decode("utf-8")
             if not payload.strip():
                 return {}
@@ -35,11 +38,26 @@ def _http_json(method, url, headers=None, data=None):
             except json.JSONDecodeError:
                 print(f"\n❌ [DEBUG API] Resposta não-JSON (Firewall/Redirecionamento):\n{payload}\n")
                 raise IntegrationError("A API retornou um formato HTML inesperado.")
-                
+
     except HTTPError as error:
         body = error.read().decode("utf-8", errors="ignore")
         print(f"\n❌ [DEBUG API] Erro HTTP {error.code}:\n{body}\n")
         raise IntegrationError(f"{method} {url} falhou: {error.code} {body}") from error
+    except URLError as error:
+        # Timeout, DNS, conexao recusada etc. — sem status HTTP, mas ainda um
+        # IntegrationError para que os retries/failover (ex.: Overpass) tratem
+        # isso igual a um 502/503/504.
+        print(f"\n❌ [DEBUG API] Erro de conexao com {url}: {error.reason}\n")
+        raise IntegrationError(f"{method} {url} falhou: {error.reason}") from error
+    except TimeoutError as error:
+        # urlopen(..., timeout=...) estoura via TimeoutError quando o timeout
+        # acontece NO MEIO da leitura da resposta (apos a conexao abrir), em
+        # vez de URLError (que cobre falha ao abrir a conexao). Sem isso, um
+        # timeout de leitura no meio de um lote longo (ex.: experimento com
+        # muitas conversas) derrubava o comando inteiro sem passar pelo
+        # failover/retry.
+        print(f"\n❌ [DEBUG API] Timeout de leitura em {url}\n")
+        raise IntegrationError(f"{method} {url} falhou: timeout de leitura") from error
 _ABACATEPAY_BASE = "https://api.abacatepay.com/v1"
 
 
@@ -247,9 +265,31 @@ def _osm_place_to_result(element, ref_lat, ref_lon):
     }
 
 
-_OVERPASS_RETRYABLE_STATUS_CODES = {502, 503, 504}
-_OVERPASS_MAX_ATTEMPTS = 3
-_OVERPASS_RETRY_DELAY_SECONDS = 2
+def _build_overpass_endpoints():
+    """Se OVERPASS_LOCAL_URL estiver configurada (instancia Docker local,
+    ver docs/overpass-local.md), ela e tentada primeiro — sem rate-limit e
+    sem dependencia de rede externa. Os espelhos publicos continuam como
+    fallback (ex.: em producao, onde nao ha instancia local rodando).
+    overpass-api.de e a instancia "oficial" mas e notoriamente instavel sob
+    carga; kumi.systems e openstreetmap.ru sao os espelhos publicos mais
+    usados como failover (mesmo protocolo Overpass QL, sem necessidade de
+    chave)."""
+    endpoints = []
+    local_url = getattr(settings, "OVERPASS_LOCAL_URL", "")
+    if local_url:
+        endpoints.append(local_url)
+    endpoints += [
+        "https://overpass-api.de/api/interpreter",
+        "https://overpass.kumi.systems/api/interpreter",
+        "https://overpass.openstreetmap.ru/api/interpreter",
+    ]
+    return endpoints
+
+
+_OVERPASS_ENDPOINTS = _build_overpass_endpoints()
+_OVERPASS_RETRYABLE_STATUS_CODES = {406, 429, 500, 502, 503, 504}
+_OVERPASS_MAX_ATTEMPTS_PER_ENDPOINT = 2
+_OVERPASS_RETRY_DELAY_SECONDS = 3
 
 
 def _overpass_request(overpass_ql):
@@ -257,28 +297,38 @@ def _overpass_request(overpass_ql):
     from urllib.parse import quote_plus
     body = f"data={quote_plus(overpass_ql)}".encode("utf-8")
 
-    # The public overpass-api.de instance is a shared, rate-limited service —
-    # it occasionally answers with a transient 502/503/504 when busy, even for
-    # well-formed, idempotent read-only queries. Retry those a couple of times
-    # with a short backoff before giving up (any other error is not retried).
+    # Cada espelho é um serviço público compartilhado e sem SLA — responde
+    # ocasionalmente com 502/503/504 (ou nem responde, e o timeout do
+    # _http_json estoura) mesmo para queries bem formadas. Tenta cada espelho
+    # algumas vezes com um pequeno backoff e, se esgotar as tentativas nele,
+    # passa para o próximo da lista antes de desistir de vez. Um erro não
+    # retryable (ex.: query malformada, HTTP 400) propaga imediatamente sem
+    # tentar outros espelhos, já que o problema é a query, não o servidor.
     last_error = None
-    for attempt in range(1, _OVERPASS_MAX_ATTEMPTS + 1):
-        try:
-            return _http_json(
-                "POST",
-                "https://overpass-api.de/api/interpreter",
-                headers={
-                    "Content-Type": "application/x-www-form-urlencoded",
-                    "Accept": "application/json",
-                },
-                data=body,
-            )
-        except IntegrationError as error:
-            status_code = getattr(getattr(error, "__cause__", None), "code", None)
-            last_error = error
-            if status_code not in _OVERPASS_RETRYABLE_STATUS_CODES or attempt == _OVERPASS_MAX_ATTEMPTS:
-                raise
-            time.sleep(_OVERPASS_RETRY_DELAY_SECONDS * attempt)
+    for endpoint in _OVERPASS_ENDPOINTS:
+        for attempt in range(1, _OVERPASS_MAX_ATTEMPTS_PER_ENDPOINT + 1):
+            try:
+                return _http_json(
+                    "POST",
+                    endpoint,
+                    headers={
+                        "Content-Type": "application/x-www-form-urlencoded",
+                        "Accept": "application/json",
+                    },
+                    data=body,
+                )
+            except IntegrationError as error:
+                status_code = getattr(getattr(error, "__cause__", None), "code", None)
+                last_error = error
+                # status_code is None cobre falhas de conexao/timeout (sem
+                # resposta HTTP) e respostas nao-JSON (bloqueio de WAF) —
+                # tratadas como retryable/failover igual a um 502/503/504.
+                retryable = status_code is None or status_code in _OVERPASS_RETRYABLE_STATUS_CODES
+                if not retryable:
+                    raise
+                if attempt < _OVERPASS_MAX_ATTEMPTS_PER_ENDPOINT:
+                    time.sleep(_OVERPASS_RETRY_DELAY_SECONDS * attempt)
+        logger.warning("Overpass: espelho %s esgotou tentativas, tentando o proximo.", endpoint)
     raise last_error
 
 

@@ -263,6 +263,10 @@ REDIS_URL = config('REDIS_URL', default='redis://127.0.0.1:6379/1')
 REDIS_CELERY_URL = config('REDIS_CELERY_URL', default='redis://127.0.0.1:6379/2')
 GOOGLE_SSV_ENABLED = config('GOOGLE_SSV_ENABLED', default=True, cast=bool)
 GEMINI_API_KEY = config('GEMINI_API_KEY', default='')
+# Instancia local da Overpass API (Docker, ver docs/overpass-local.md) para o
+# experimento do TCC — tentada antes dos espelhos publicos quando configurada.
+# Vazia por padrao (producao usa so os espelhos publicos).
+OVERPASS_LOCAL_URL = config('OVERPASS_LOCAL_URL', default='')
 DATE_SUGGESTION_CONFIDENCE_THRESHOLD = config("DATE_SUGGESTION_CONFIDENCE_THRESHOLD", cast=int, default=80)
 DATE_SUGGESTION_COOLDOWN_MESSAGES = config("DATE_SUGGESTION_COOLDOWN_MESSAGES", cast=int, default=10)
 DATE_SUGGESTION_COOLDOWN_HOURS = config("DATE_SUGGESTION_COOLDOWN_HOURS", cast=int, default=1)
