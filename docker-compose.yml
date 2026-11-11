@@ -50,5 +50,26 @@ services:
     ports:
       - "6379:6379"
 
+  # Instancia local da Overpass API, recortada para a regiao de Sao Luis - MA
+  # (raio de 100km ao redor de (-2.53, -44.3028), ver RADIUS_KM em
+  # run_date_experiment.py). Usada no experimento do TCC (Secao 3.2) para
+  # eliminar a dependencia de espelhos publicos compartilhados — ver
+  # docs/overpass-local.md para como gerar ./osm_data/sao-luis.osm.bz2.
+  overpass:
+    profiles: ["overpass"]
+    image: wiktorn/overpass-api
+    container_name: bonding_overpass
+    restart: unless-stopped
+    environment:
+      OVERPASS_MODE: init
+      OVERPASS_PLANET_URL: file:///db/sao-luis.osm.bz2
+      OVERPASS_META: "no"
+      OVERPASS_USE_AREAS: "false"
+      OVERPASS_STOP_AFTER_INIT: "false"
+    volumes:
+      - ./osm_data:/db
+    ports:
+      - "12345:80"
+
 volumes:
   postgres_data:

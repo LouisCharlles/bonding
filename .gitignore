@@ -8,3 +8,8 @@ db.sqlite3
 **__pycache__/
 # Local Codex CLI marker file
 .codex
+
+# Extrato local do OpenStreetMap para a instancia Overpass auto-hospedada
+# (Secao 3.2 do TCC) - dado binario grande, regeneravel via
+# docs/overpass-local.md, nao faz sentido versionar.
+osm_data/
